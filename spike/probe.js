@@ -249,6 +249,16 @@ async function m5Run() {
   var dur = player.getDuration();
   if (!dur) { say('Duree inconnue: lance la lecture quelques secondes d abord.'); return; }
 
+  /*
+   * La lecture doit etre en pause pendant la mesure. Sinon la position avance pendant
+   * le temps de stabilisation qu'on laisse au lecteur, et on mesure sa propre attente
+   * au lieu de l'erreur de positionnement. C'est le defaut qui a invalide la premiere
+   * campagne du 2026-08-19.
+   */
+  var wasPlaying = player.getPlayerState() === 1;
+  player.pauseVideo();
+  await sleep(400);
+
   var cases = [
     { label: 'zone probablement chargee', target: Math.min(12.345, dur - 2), ahead: true },
     { label: 'zone probablement chargee', target: Math.min(20.9, dur - 2), ahead: true },
@@ -259,15 +269,20 @@ async function m5Run() {
   for (var i = 0; i < cases.length; i++) {
     var c = cases[i];
     player.seekTo(c.target, c.ahead);
-    await sleep(1600); // laisser le lecteur se stabiliser: la position relue juste apres est un echo
+    await sleep(1600);
     var got = player.getCurrentTime();
+    var state = player.getPlayerState();
     say('  demande ' + c.target.toFixed(3) + ' (' + c.label + ') -> lu ' + got.toFixed(3) +
-        '   ecart ' + ((got - c.target) * 1000).toFixed(0) + ' ms');
+        '   ecart ' + ((got - c.target) * 1000).toFixed(0) + ' ms   [etat ' + state + ']');
   }
+
+  if (wasPlaying) player.playVideo();
   say('');
-  say('=> Un ecart nul signifie que la valeur relue est un echo de la demande, pas une');
-  say('   observation. Un ecart negatif signifie un recalage sur la keyframe precedente.');
-  say('   Le cas allowSeekAhead=false hors zone chargee ne fait rien, silencieusement.');
+  say('=> Lecture en pause pendant toute la mesure: l ecart affiche est bien une erreur');
+  say('   de positionnement, pas de la lecture normale.');
+  say('   Ecart nul = la valeur relue est un echo de la demande, pas une observation.');
+  say('   Ecart negatif = recalage sur la keyframe precedente.');
+  say('   Un etat different de 2 (pause) invalide la mesure de cette ligne.');
 }
 
 /* --- Export ---------------------------------------------------------------- */
