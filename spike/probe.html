@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Banc de mesure - API YouTube</title>
+<style>
+body{font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+ margin:0;padding:24px;background:#fafafa;color:#18181b;max-width:1100px}
+h1{font-size:1.4rem;margin:0 0 4px}
+h2{font-size:1.05rem;margin:28px 0 8px}
+.sub{color:#71717a;margin:0 0 20px}
+.warn{background:#fff7ed;border:1px solid #fdba74;border-radius:8px;padding:12px 16px;margin:0 0 20px}
+.warn code{background:#fed7aa;padding:1px 5px;border-radius:4px}
+.row{display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap}
+#player{width:480px;height:270px;background:#000}
+.panel{flex:1;min-width:320px}
+button{font:inherit;padding:7px 12px;margin:0 6px 6px 0;border:1px solid #d4d4d8;
+ background:#fff;border-radius:6px;cursor:pointer}
+button:hover{background:#f4f4f5}
+button:disabled{opacity:.45;cursor:default}
+input{font:inherit;padding:6px 8px;border:1px solid #d4d4d8;border-radius:6px;width:260px}
+pre{background:#fff;border:1px solid #e4e4e7;border-radius:8px;padding:12px;
+ font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;max-height:340px;overflow:auto;
+ white-space:pre-wrap;word-break:break-word}
+.hint{color:#71717a;font-size:.88rem;margin:4px 0 10px}
+</style>
+</head>
+<body>
+
+<h1>Banc de mesure de l'API YouTube</h1>
+<p class="sub">Repond aux cinq inconnues de l'unite U1 du plan. Aucune dependance, aucune etape de build.</p>
+
+<div class="warn">
+  <strong>A servir en HTTP, pas en <code>file://</code>.</strong>
+  Depuis juillet 2025 le lecteur embarque exige l'en-tete <code>Referer</code>, qu'une page ouverte
+  depuis le disque n'envoie pas : tu obtiendrais une erreur 153 et rien ne demarrerait.
+  Depuis la racine du projet :
+  <br><code>python3 -m http.server 8000</code>
+  puis <code>http://localhost:8000/spike/probe.html</code>
+</div>
+
+<div class="row">
+  <div><div id="player"></div></div>
+  <div class="panel">
+    <p class="hint">Video a charger (id ou lien). Prends une video tres monetisee pour avoir une chance de declencher une publicite.</p>
+    <input id="videoInput" value="kJQP7kiw5Fk">
+    <button id="loadBtn">Charger</button>
+    <p class="hint" id="state">API non chargee.</p>
+  </div>
+</div>
+
+<h2>1. Cadence des mises a jour de position</h2>
+<p class="hint">Lance la lecture et laisse tourner dix minutes, onglet au premier plan. C'est cette cadence qui fixe le plancher de correction.</p>
+<button id="m1Start">Demarrer la mesure</button>
+<button id="m1Stop" disabled>Arreter et resumer</button>
+
+<h2>2. Grille de vitesses acceptees</h2>
+<p class="hint">Balaye de 0,25 a 2,00 par pas de 0,01 et relit la valeur obtenue. Environ 25 secondes. Verifie ensuite a l'oreille, chronometre en main, que le media suit vraiment entre 1,00 et 1,30.</p>
+<button id="m2Run">Lancer le balayage</button>
+
+<h2>3. Comportement pendant une publicite</h2>
+<p class="hint">Passif : demarre la capture, recharge des videos monetisees jusqu'a tomber sur une pub. Enregistre tout ce qui change et si un evenement d'etat de publicite est emis.</p>
+<button id="m3Start">Demarrer la capture</button>
+<button id="m3Stop" disabled>Arreter et resumer</button>
+
+<h2>4. Onglet en arriere-plan</h2>
+<p class="hint">Demarre, puis passe sur un autre onglet pendant au moins deux minutes et reviens. Mesure la cadence reelle d'une minuterie, avec et sans son, et si une reprise pilotee par le code fonctionne onglet cache.</p>
+<button id="m4Start">Demarrer la mesure</button>
+<button id="m4Stop" disabled>Arreter et resumer</button>
+
+<h2>5. Precision du positionnement</h2>
+<p class="hint">Compare la position demandee et la position reellement atteinte, dans et hors zone deja telechargee.</p>
+<button id="m5Run">Lancer le test</button>
+
+<h2>Resultats</h2>
+<button id="exportBtn">Copier le rapport</button>
+<button id="clearBtn">Effacer</button>
+<pre id="log">En attente.</pre>
+
+<script src="probe.js"></script>
+<script src="https://www.youtube.com/iframe_api"></script>
+</body>
+</html>
