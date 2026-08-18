@@ -15,6 +15,6 @@
     "noEmit": true,
     "types": ["node", "vitest/globals"]
   },
-  "include": ["shared", "server", "client"],
+  "include": ["shared", "server", "client", "tools"],
   "exclude": ["node_modules", "dist", "spike"]
 }

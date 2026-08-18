@@ -7,7 +7,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "sim": "tsx tools/simulate.ts"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -24,6 +25,7 @@
     "jsdom": "^25.0.0",
     "typescript": "^5.5.4",
     "vite": "^5.4.2",
-    "vitest": "^2.0.5"
+    "vitest": "^2.0.5",
+    "tsx": "^4.19.0"
   }
 }
