@@ -40,6 +40,7 @@ export function createSession(deps: SessionDeps) {
    * Non mesurable a distance, donc reglee a l oreille et conservee sur l appareil.
    */
   let outputLatencyMs = 0;
+  let lastObservedPositionMs = 0;
   const stalls = createStallDetector({ graceMs: STALL_GRACE_MS });
 
   return {
@@ -110,6 +111,7 @@ export function createSession(deps: SessionDeps) {
       }
 
       const observation = player.observe(nowMs);
+      lastObservedPositionMs = observation.positionMs;
       const verdict = stalls.observe({
         positionMs: observation.positionMs,
         fresh: observation.fresh,
@@ -206,6 +208,7 @@ export function createSession(deps: SessionDeps) {
         myId,
         pending,
         hasStart: start !== null,
+        positionMs: Math.round(lastObservedPositionMs),
         clock: clock.estimate(),
         outputLatencyMs,
         stallAnnounced,
