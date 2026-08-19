@@ -35,12 +35,21 @@ export function App() {
   const [now, setNow] = useState(() => Date.now());
   const [pairGap, setPairGap] = useState<number | null>(null);
   const session = useRef<ReturnType<typeof createSession> | null>(null);
+  /*
+   * Les messages arrives avant que le lecteur soit pret seraient perdus: le depart
+   * commun ouvre sa barriere des le clic sur Lecture, alors que la session ne naît
+   * qu apres onReady. On les garde et on les rejoue.
+   */
+  const early = useRef<Array<{ message: ServerMessage; atMs: number }>>([]);
   const port = useRef<ReturnType<typeof createYouTubePlayer> | null>(null);
-  const playerReady = useRef(false);
+  const playerCreated = useRef(false);
+  const [playerReady, setPlayerReady] = useState(false);
   const loadedVideo = useRef<string | null>(null);
 
   const handle = useCallback((message: ServerMessage) => {
-    session.current?.onServerMessage(message, Date.now());
+    const atMs = Date.now();
+    if (session.current) session.current.onServerMessage(message, atMs);
+    else early.current.push({ message, atMs });
     switch (message.type) {
       case "room_state":
         setRoom({
@@ -87,16 +96,58 @@ export function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // Creation du lecteur et de la session, une seule fois, une fois la room rejointe.
+  const currentVideoId =
+    room?.queue.find((q) => q.itemId === room.currentItemId)?.videoId ?? null;
+
+  /*
+   * Creation du lecteur, une seule fois, des qu un morceau courant existe.
+   * Un lecteur cree sans identifiant de video n emet jamais onReady: il n a rien a
+   * preparer, et le cadre reste noir sans la moindre erreur.
+   */
   useEffect(() => {
-    if (room === null || playerReady.current) return;
+    if (currentVideoId === null || playerCreated.current) return;
+    playerCreated.current = true;
     let cancelled = false;
 
     void loadYouTubeApi().then((Player) => {
       if (cancelled) return;
       const raw = new Player("yt-player", {
+        videoId: currentVideoId,
         playerVars: { rel: 0, playsinline: 1 },
         events: {
+          /*
+           * Le lecteur n est utilisable qu apres onReady. Avant, loadVideoById et
+           * playVideo ne font rien et ne le disent pas: le cadre reste noir sans la
+           * moindre erreur. C est pour cela que la session ne naît qu ici.
+           */
+          onReady: () => {
+            const port_ = createYouTubePlayer({
+              raw,
+              // Fraction visible du lecteur: la lecture automatique n est permise au
+              // premier demarrage que si plus de la moitie du cadre est a l ecran.
+              visibleFraction: () => {
+                const el = document.getElementById("yt-player");
+                if (!el || document.hidden) return 0;
+                const box = el.getBoundingClientRect();
+                const shown = Math.max(0, Math.min(box.bottom, window.innerHeight) - Math.max(box.top, 0));
+                return box.height === 0 ? 0 : shown / box.height;
+              },
+            });
+            port.current = port_;
+            session.current = createSession({
+              player: port_,
+              clock: createClockEstimator(),
+              log: createDriftLog(),
+              thresholds: SYNC_THRESHOLDS,
+              send: (message) => transport.current?.send(message),
+            });
+            loadedVideo.current = currentVideoId;
+            for (const pending of early.current) {
+              session.current.onServerMessage(pending.message, pending.atMs);
+            }
+            early.current = [];
+            setPlayerReady(true);
+          },
           onError: (event) => {
             const fault = faultFromErrorCode(event.data);
             setError(
@@ -107,44 +158,20 @@ export function App() {
           },
         },
       });
-
-      port.current = createYouTubePlayer({
-        raw,
-        // Fraction visible du lecteur: la lecture automatique n est permise au premier
-        // demarrage que si plus de la moitie du cadre est a l ecran.
-        visibleFraction: () => {
-          const el = document.getElementById("yt-player");
-          if (!el || document.hidden) return 0;
-          const box = el.getBoundingClientRect();
-          const shown = Math.max(0, Math.min(box.bottom, window.innerHeight) - Math.max(box.top, 0));
-          return box.height === 0 ? 0 : shown / box.height;
-        },
-      });
-
-      session.current = createSession({
-        player: port.current,
-        clock: createClockEstimator(),
-        log: createDriftLog(),
-        thresholds: SYNC_THRESHOLDS,
-        send: (message) => transport.current?.send(message),
-      });
-      playerReady.current = true;
     });
 
     return () => { cancelled = true; };
-  }, [room]);
+  }, [currentVideoId]);
 
   /*
    * Chargement du morceau courant. Le lecteur remet la vitesse a 1 au chargement:
    * l adaptateur le signale, et la session annule sa correction en cours.
    */
   useEffect(() => {
-    const item = room?.queue.find((q) => q.itemId === room.currentItemId);
-    const videoId = item?.videoId ?? null;
-    if (videoId === null || videoId === loadedVideo.current || !port.current) return;
-    loadedVideo.current = videoId;
-    port.current.load(videoId, Date.now());
-  }, [room]);
+    if (currentVideoId === null || currentVideoId === loadedVideo.current || !port.current) return;
+    loadedVideo.current = currentVideoId;
+    port.current.load(currentVideoId, Date.now());
+  }, [currentVideoId, playerReady]);
 
   // La boucle de synchronisation. Sa cadence vient de la mesure du 2026-08-19:
   // en onglet arriere-plan les minuteries tombent a une par seconde de toute facon.
