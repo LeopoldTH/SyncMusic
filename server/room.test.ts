@@ -1,0 +1,133 @@
+import { describe, it, expect } from "vitest";
+import { createRoom } from "./room";
+
+const CFG = { maxParticipants: 2, maxWaitMs: 45_000, leadMs: 500, graceMs: 30_000 };
+const T0 = 1_000_000;
+
+function roomWithTwo() {
+  const room = createRoom("ABCD", CFG);
+  room.join("leo", T0);
+  room.join("pote", T0 + 100);
+  return room;
+}
+
+describe("arrivees et departs", () => {
+  it("accepte deux participants", () => {
+    const room = createRoom("ABCD", CFG);
+    expect(room.join("leo", T0).ok).toBe(true);
+    expect(room.join("pote", T0).ok).toBe(true);
+  });
+
+  it("refuse un troisieme participant", () => {
+    const room = roomWithTwo();
+    const third = room.join("tiers", T0 + 200);
+    expect(third.ok).toBe(false);
+    if (!third.ok) expect(third.code).toBe("room_full");
+  });
+
+  it("marque un participant deconnecte sans le retirer tout de suite", () => {
+    const room = roomWithTwo();
+    room.disconnect("pote", T0 + 1_000);
+    expect(room.state().participants).toContain("pote");
+    expect(room.isEmpty(T0 + 1_000)).toBe(false);
+  });
+
+  it("retrouve la room et sa file lors d une reconnexion pendant le delai de grace", () => {
+    const room = roomWithTwo();
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0 + 500);
+    room.disconnect("pote", T0 + 1_000);
+    const back = room.join("pote", T0 + 5_000);
+    expect(back.ok).toBe(true);
+    expect(room.state().queue).toHaveLength(1);
+  });
+
+  it("n est vide qu une fois le delai de grace ecoule pour tout le monde", () => {
+    const room = roomWithTwo();
+    room.disconnect("leo", T0);
+    room.disconnect("pote", T0);
+    expect(room.isEmpty(T0 + CFG.graceMs - 1)).toBe(false);
+    expect(room.isEmpty(T0 + CFG.graceMs + 1)).toBe(true);
+  });
+
+  it("laisse une place libre apres l expiration du delai de grace", () => {
+    const room = roomWithTwo();
+    room.disconnect("pote", T0);
+    const third = room.join("tiers", T0 + CFG.graceMs + 1);
+    expect(third.ok).toBe(true);
+  });
+});
+
+describe("file de lecture", () => {
+  it("ajoute en fin de file", () => {
+    const room = roomWithTwo();
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    room.queueAdd("pote", "dQw4w9WgXcQ", T0 + 10);
+    expect(room.state().queue.map((i) => i.videoId)).toEqual(["kJQP7kiw5Fk", "dQw4w9WgXcQ"]);
+  });
+
+  it("retire un morceau pas encore joue", () => {
+    const room = roomWithTwo();
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    const second = room.queueAdd("leo", "dQw4w9WgXcQ", T0 + 10);
+    if (!second.ok) return expect.unreachable("l ajout aurait du reussir");
+    expect(room.queueRemove("pote", second.itemId, T0 + 20).ok).toBe(true);
+    expect(room.state().queue).toHaveLength(1);
+  });
+
+  it("refuse de retirer le morceau en cours de lecture", () => {
+    const room = roomWithTwo();
+    const first = room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    if (!first.ok) return expect.unreachable("l ajout aurait du reussir");
+    room.control("play", T0 + 10);
+    const removed = room.queueRemove("leo", first.itemId, T0 + 20);
+    expect(removed.ok).toBe(false);
+    if (!removed.ok) expect(removed.code).toBe("cannot_remove_playing");
+    expect(room.state().queue).toHaveLength(1);
+  });
+
+  it("arrete la lecture quand la file se vide", () => {
+    const room = roomWithTwo();
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    room.control("play", T0 + 10);
+    room.control("next", T0 + 20);
+    expect(room.state().playing).toBe(false);
+    expect(room.state().currentItemId).toBe(null);
+  });
+});
+
+describe("controle concurrent", () => {
+  it("laisse l etat correspondant a la seconde action recue", () => {
+    const room = roomWithTwo();
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    room.control("play", T0 + 10);
+    room.control("pause", T0 + 11);
+    expect(room.state().playing).toBe(false);
+  });
+});
+
+describe("horloge et positions", () => {
+  it("repond a une sonde avec trois horodatages coherents", () => {
+    const room = roomWithTwo();
+    const reply = room.clockProbe(999, T0 + 40);
+    expect(reply.clientSentAt).toBe(999);
+    expect(reply.serverReceivedAt).toBe(T0 + 40);
+    expect(reply.serverSentAt).toBeGreaterThanOrEqual(reply.serverReceivedAt);
+  });
+
+  it("rediffuse la position rapportee par chaque participant", () => {
+    const room = roomWithTwo();
+    room.reportPosition("leo", { positionMs: 30_000, fresh: true }, T0 + 100);
+    room.reportPosition("pote", { positionMs: 30_400, fresh: true }, T0 + 120);
+    const peers = room.peerPositions(T0 + 130);
+    expect(peers.positions).toHaveLength(2);
+    expect(peers.positions.find((p) => p.participantId === "pote")?.positionMs).toBe(30_400);
+  });
+
+  it("ouvre une barriere sur une stagnation annoncee", () => {
+    const room = roomWithTwo();
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    room.control("play", T0 + 10);
+    const out = room.stall("pote", 30_000, T0 + 20);
+    expect(out.kind).toBe("waiting");
+  });
+});
