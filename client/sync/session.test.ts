@@ -237,3 +237,21 @@ describe("ecart par paire", () => {
     expect(s.pairGapMs()).toBe(null);
   });
 });
+
+describe("reponse de sonde incoherente", () => {
+  it("ignore une reponse dont la reemission precede la reception", () => {
+    const player = fakePlayer({ positionMs: 0, fresh: true, playing: false });
+    const clock = createClockEstimator();
+    const session = createSession({
+      player, clock, log: createDriftLog(), thresholds: SYNC_THRESHOLDS, send: () => {},
+    });
+    for (let i = 0; i < 6; i++) {
+      session.onServerMessage(
+        { type: "clock_probe_reply", clientSentAt: i * 10, serverReceivedAt: i * 10 + 40, serverSentAt: i * 10 + 20 },
+        i * 10 + 60
+      );
+    }
+    // Aucune sonde acceptee: l estimation ne peut pas avoir converge.
+    expect(clock.estimate().samples).toBe(0);
+  });
+});

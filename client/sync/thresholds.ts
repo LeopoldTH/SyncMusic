@@ -40,12 +40,6 @@ export const SYNC_THRESHOLDS: Thresholds = {
  */
 export const LOOP_MS = 1_000;
 
-/*
- * Delai maximum d attente partagee. Non mesure: choisi pour couvrir une publicite
- * non desactivable typique tout en restant supportable. A reevaluer avec les
- * donnees d interruption de R20.
- */
-export const MAX_WAIT_MS = 45_000;
 
 /*
  * Delai de grace avant qu un participant qui vient de repartir puisse etre redeclare

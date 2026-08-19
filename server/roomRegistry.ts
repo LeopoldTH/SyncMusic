@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 /*
  * Attribution des codes et cycle de vie des rooms (R1, R4).
  * Le tirage est injectable pour que la collision soit testable.
@@ -9,11 +10,15 @@ export type Room = ReturnType<typeof createRoom>;
 
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
+/*
+ * Le code de room est le seul controle d acces de l application (KD9): il n y a ni
+ * compte ni mot de passe. Math.random n est pas fait pour ca — son etat interne se
+ * reconstitue a partir de quelques tirages observes, ce qui permettrait de deviner
+ * les codes suivants. randomInt puise dans la source cryptographique du systeme.
+ */
 function randomCode(): string {
   let out = "";
-  for (let i = 0; i < 4; i++) {
-    out += ALPHABET[Math.floor(Math.random() * ALPHABET.length)] ?? "A";
-  }
+  for (let i = 0; i < 4; i++) out += ALPHABET[randomInt(ALPHABET.length)] ?? "A";
   return out;
 }
 

@@ -4,6 +4,7 @@
  * et rediffuse l etat, rien de plus.
  */
 
+import { randomBytes } from "node:crypto";
 import { WebSocketServer, type WebSocket } from "ws";
 import { parseClientMessage, type ServerMessage } from "../shared/protocol";
 import { createRegistry, type Room } from "./roomRegistry";
@@ -30,8 +31,12 @@ interface Session {
 const registry = createRegistry(CONFIG);
 const sessions = new Map<WebSocket, Session>();
 
+/*
+ * Identifiant de participant. Tire de la source cryptographique du systeme comme le
+ * code de room: il circule entre les deux clients et sert a s adresser a quelqu un.
+ */
 function newParticipantId(): string {
-  return "p" + Math.random().toString(36).slice(2, 10);
+  return "p" + randomBytes(6).toString("hex");
 }
 
 function send(socket: WebSocket, message: ServerMessage): void {
@@ -60,14 +65,44 @@ function fail(socket: WebSocket, code: ErrorCode, message: string): void {
   send(socket, { type: "error", code, message });
 }
 
-const wss = new WebSocketServer({ port: PORT });
+/*
+ * Garde-fous pour un serveur expose publiquement. Aucune donnee sensible ne transite
+ * ici, mais une room est de la memoire et une connexion ouverte est une ressource:
+ * sans plafond, n importe qui peut en consommer autant qu il veut.
+ */
+const MAX_PAYLOAD_BYTES = 16 * 1024;
+const MAX_ROOMS = 500;
+const MAX_MESSAGES_PER_10S = 200;
+const ALLOWED_ORIGIN = process.env["ALLOWED_ORIGIN"] ?? null;
+
+const wss = new WebSocketServer({
+  port: PORT,
+  maxPayload: MAX_PAYLOAD_BYTES,
+  /*
+   * Sans verification d origine, n importe quel site peut ouvrir une connexion vers
+   * ce serveur depuis le navigateur d un visiteur et piloter des rooms. Non defini en
+   * developpement, ou l origine varie; a renseigner au deploiement.
+   */
+  verifyClient: ALLOWED_ORIGIN === null
+    ? undefined
+    : ({ origin }, done) => done(origin === ALLOWED_ORIGIN, 403, "origine refusee"),
+});
 
 wss.on("connection", (socket) => {
   sessions.set(socket, { participantId: newParticipantId(), code: null });
+  // Budget glissant de messages: une connexion qui inonde est fermee, pas servie.
+  let budget = MAX_MESSAGES_PER_10S;
+  const refill = setInterval(() => { budget = MAX_MESSAGES_PER_10S; }, 10_000);
+  socket.on("close", () => clearInterval(refill));
 
   socket.on("message", (raw) => {
     const session = sessions.get(socket);
     if (!session) return;
+
+    if (budget-- <= 0) {
+      socket.close(1008, "trop de messages");
+      return;
+    }
 
     let payload: unknown;
     try {

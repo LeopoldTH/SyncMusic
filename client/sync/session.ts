@@ -8,7 +8,7 @@
  * indefiniment autour du plancher. Defaut trouve par le simulateur, pas par les tests.
  */
 
-import type { ClientMessage, ServerMessage } from "../../shared/protocol";
+import { probeReplyIsCoherent, type ClientMessage, type ServerMessage } from "../../shared/protocol";
 import type { PlayerPort } from "../player/playerPort";
 import { createClockEstimator } from "./clock";
 import { createDriftLog } from "./driftLog";
@@ -62,6 +62,12 @@ export function createSession(deps: SessionDeps) {
           return;
 
         case "clock_probe_reply":
+          /*
+           * Une reponse incoherente (reemission anterieure a la reception) ne peut pas
+           * venir d une horloge saine. L accepter empoisonnerait l estimation pour
+           * toute la fenetre glissante, sans que rien ne le signale.
+           */
+          if (!probeReplyIsCoherent(message)) return;
           clock.accept({
             clientSentAt: message.clientSentAt,
             serverReceivedAt: message.serverReceivedAt,
