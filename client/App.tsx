@@ -14,6 +14,9 @@ import { Queue } from "./components/Queue";
 import { Controls } from "./components/Controls";
 import { StatusBar } from "./components/StatusBar";
 import { PlayerFrame } from "./components/PlayerFrame";
+import { DriftChart } from "./components/DriftChart";
+import { LatencyCalibration } from "./components/LatencyCalibration";
+import type { DriftPoint } from "./sync/driftLog";
 
 interface RoomView {
   code: string;
@@ -34,6 +37,11 @@ export function App() {
   const [link, setLink] = useState("");
   const [now, setNow] = useState(() => Date.now());
   const [pairGap, setPairGap] = useState<number | null>(null);
+  const [drift, setDrift] = useState<readonly DriftPoint[]>([]);
+  const [latencyMs, setLatencyMs] = useState(() => {
+    const stored = window.localStorage.getItem("syncmusic.latencyMs");
+    return stored === null ? 0 : Number(stored);
+  });
   const session = useRef<ReturnType<typeof createSession> | null>(null);
   /*
    * Les messages arrives avant que le lecteur soit pret seraient perdus: le depart
@@ -184,9 +192,17 @@ export function App() {
       if (!current) return;
       current.tick(Date.now());
       setPairGap(current.pairGapMs());
+      setDrift([...current.driftPoints()]);
     }, LOOP_MS);
     return () => clearInterval(timer);
   }, []);
+
+  // Le reglage vit sur l appareil: la latence d une enceinte ne concerne que son
+  // proprietaire, et la redemander a chaque session serait absurde.
+  useEffect(() => {
+    window.localStorage.setItem("syncmusic.latencyMs", String(latencyMs));
+    session.current?.setOutputLatencyMs(latencyMs);
+  }, [latencyMs, playerReady]);
 
   const rawSend = transport.current?.send.bind(transport.current);
   const send = rawSend
@@ -263,6 +279,10 @@ export function App() {
         currentItemId={room.currentItemId}
         onRemove={(itemId) => send?.({ type: "queue_remove", itemId })}
       />
+
+      <DriftChart points={drift} thresholdMs={SYNC_THRESHOLDS.floorMs * 2} />
+
+      <LatencyCalibration valueMs={latencyMs} onChange={setLatencyMs} />
     </main>
   );
 }

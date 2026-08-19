@@ -34,6 +34,12 @@ export function createSession(deps: SessionDeps) {
   let inFlight: { endsAtMs: number } | null = null;
   let pairGap: number | null = null;
   let stallAnnounced = false;
+  /*
+   * Compensation de la latence de sortie audio (KD8). Une enceinte Bluetooth sort le
+   * son avec du retard: pour l entendre au bon moment, il faut lire en avance d autant.
+   * Non mesurable a distance, donc reglee a l oreille et conservee sur l appareil.
+   */
+  let outputLatencyMs = 0;
   const stalls = createStallDetector({ graceMs: STALL_GRACE_MS });
 
   return {
@@ -136,7 +142,7 @@ export function createSession(deps: SessionDeps) {
       if (start === null) return;
 
       const offset = clock.estimate().offsetMs;
-      const target = targetPositionMs(start, offset, nowMs);
+      const target = targetPositionMs(start, offset, nowMs) + outputLatencyMs;
       const gap = observedGapMs(target, observation.positionMs);
       log.record({ atMs: nowMs, localGapMs: gap, pairGapMs: pairGap });
 
@@ -172,6 +178,22 @@ export function createSession(deps: SessionDeps) {
 
     pairGapMs(): number | null {
       return pairGap;
+    },
+
+    setOutputLatencyMs(value: number): void {
+      outputLatencyMs = value;
+    },
+
+    outputLatencyMs(): number {
+      return outputLatencyMs;
+    },
+
+    driftPoints() {
+      return log.points();
+    },
+
+    driftSummary(thresholdMs: number) {
+      return log.summary(thresholdMs);
     },
 
     correcting(): boolean {
