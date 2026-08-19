@@ -93,7 +93,7 @@ describe("correction en cours", () => {
   });
 });
 
-describe("observation non fraiche", () => {
+describe("observation non fraiche et stagnation", () => {
   it("ne decide rien sur une position gelee", () => {
     const obs: PlayerObservation = { positionMs: 58_000, fresh: false, playing: true };
     const { session, player } = syncedSession(obs);
@@ -101,19 +101,61 @@ describe("observation non fraiche", () => {
     expect(player.calls.filter((c) => c.startsWith("rate:") || c.startsWith("seek:"))).toHaveLength(0);
   });
 
-  it("annonce une stagnation quand la position gele en lecture", () => {
+  it("n annonce rien sur un seul relevé sans progression", () => {
     const obs: PlayerObservation = { positionMs: 58_000, fresh: false, playing: true };
     const { session, sent } = syncedSession(obs);
     session.tick(60_000);
-    expect(sent.some((m) => m.type === "stall")).toBe(true);
+    expect(sent.some((m) => m.type === "stall")).toBe(false);
   });
 
-  it("ne repete pas l annonce de stagnation a chaque tour", () => {
+  it("annonce une stagnation au deuxieme relevé consecutif", () => {
     const obs: PlayerObservation = { positionMs: 58_000, fresh: false, playing: true };
     const { session, sent } = syncedSession(obs);
     session.tick(60_000);
     session.tick(61_000);
+    session.tick(62_000);
+    expect(sent.some((m) => m.type === "stall")).toBe(true);
+  });
+
+  it("ne repete pas l annonce a chaque tour", () => {
+    const obs: PlayerObservation = { positionMs: 58_000, fresh: false, playing: true };
+    const { session, sent } = syncedSession(obs);
+    for (let t = 60_000; t <= 65_000; t += 1_000) session.tick(t);
     expect(sent.filter((m) => m.type === "stall")).toHaveLength(1);
+  });
+});
+
+describe("pause partagee", () => {
+  it("met le lecteur en pause quand l etat partage passe a l arret", () => {
+    const obs: PlayerObservation = { positionMs: 58_000, fresh: true, playing: true };
+    const { session, player } = syncedSession(obs);
+    session.onServerMessage(
+      { type: "room_state", code: "ABCD", youAre: "leo", participants: ["leo", "pote"], queue: [], currentItemId: null, playing: false },
+      60_000
+    );
+    expect(player.calls).toContain("pause");
+  });
+
+  it("cesse de corriger apres une pause: il n y a plus de timeline a suivre", () => {
+    const obs: PlayerObservation = { positionMs: 58_000, fresh: true, playing: true };
+    const { session, player } = syncedSession(obs);
+    session.onServerMessage(
+      { type: "room_state", code: "ABCD", youAre: "leo", participants: ["leo", "pote"], queue: [], currentItemId: null, playing: false },
+      60_000
+    );
+    player.calls.length = 0;
+    session.tick(61_000);
+    expect(player.calls.filter((c) => c.startsWith("rate:") || c.startsWith("seek:"))).toHaveLength(0);
+  });
+
+  it("ne met pas en pause quand l etat partage annonce la lecture", () => {
+    const obs: PlayerObservation = { positionMs: 58_000, fresh: true, playing: true };
+    const { session, player } = syncedSession(obs);
+    session.onServerMessage(
+      { type: "room_state", code: "ABCD", youAre: "leo", participants: ["leo", "pote"], queue: [], currentItemId: null, playing: true },
+      60_000
+    );
+    expect(player.calls).not.toContain("pause");
   });
 });
 

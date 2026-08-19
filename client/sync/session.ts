@@ -15,6 +15,7 @@ import { createDriftLog } from "./driftLog";
 import { decide, type Thresholds } from "./corrector";
 import { observedGapMs, targetPositionMs, type CommonStart } from "./timeline";
 import { STALL_GRACE_MS } from "./thresholds";
+import { createStallDetector } from "./stallDetector";
 
 export interface SessionDeps {
   player: PlayerPort;
@@ -31,22 +32,24 @@ export function createSession(deps: SessionDeps) {
   let start: CommonStart | null = null;
   let pending: { barrierId: number; positionMs: number } | null = null;
   let inFlight: { endsAtMs: number } | null = null;
-  let lastStallAtMs: number | null = null;
-  let resumedAtMs: number | null = null;
   let pairGap: number | null = null;
-
-  function stallAllowed(nowMs: number): boolean {
-    if (lastStallAtMs !== null && nowMs - lastStallAtMs < STALL_GRACE_MS) return false;
-    // Un participant qui vient de repartir n est pas redeclare en stagnation tout de suite.
-    if (resumedAtMs !== null && nowMs - resumedAtMs < STALL_GRACE_MS) return false;
-    return true;
-  }
+  let stallAnnounced = false;
+  const stalls = createStallDetector({ graceMs: STALL_GRACE_MS });
 
   return {
     onServerMessage(message: ServerMessage, nowMs: number): void {
       switch (message.type) {
         case "room_state":
           myId = message.youAre;
+          /*
+           * La pause doit atteindre le lecteur. Sans cette ligne l etat partage change,
+           * l interface l affiche, et la musique continue de jouer chez les deux.
+           * La reprise, elle, repasse toujours par un depart commun (R11).
+           */
+          if (!message.playing) {
+            player.pause();
+            start = null;
+          }
           return;
 
         case "clock_probe_reply":
@@ -77,7 +80,7 @@ export function createSession(deps: SessionDeps) {
           // La cible porte deja la compensation du retard si l instant est passe.
           player.seekTo(targetPositionMs(message, offset, nowMs), nowMs);
           player.play({ automatic: true }, nowMs);
-          resumedAtMs = nowMs;
+          stallAnnounced = false;
           return;
         }
 
@@ -101,6 +104,16 @@ export function createSession(deps: SessionDeps) {
       }
 
       const observation = player.observe(nowMs);
+      const verdict = stalls.observe({
+        positionMs: observation.positionMs,
+        fresh: observation.fresh,
+        playing: observation.playing,
+        atMs: nowMs,
+      });
+      if (verdict.recovered) {
+        stallAnnounced = false;
+        if (myId !== null) log.endInterruption(myId, nowMs);
+      }
       send({
         type: "position_report",
         positionMs: Math.max(0, observation.positionMs),
@@ -136,13 +149,15 @@ export function createSession(deps: SessionDeps) {
         return;
       }
 
-      if (!observation.fresh) {
-        if (observation.playing && stallAllowed(nowMs)) {
-          lastStallAtMs = nowMs;
+      if (verdict.stalled) {
+        if (!stallAnnounced) {
+          stallAnnounced = true;
+          if (myId !== null) log.beginInterruption(myId, nowMs);
           send({ type: "stall", positionMs: Math.max(0, observation.positionMs) });
         }
         return;
       }
+      if (!observation.fresh) return;
 
       const decision = decide(gap, target, thresholds);
       if (decision.kind === "rate") {
