@@ -272,6 +272,8 @@ export function App() {
         waitingSinceMs={waitingSince}
         nowMs={now}
         pairGapMs={pairGap}
+        hasPeer={others.length > 0}
+        playing={room.playing}
         thresholdMs={SYNC_THRESHOLDS.floorMs * 2}
       />
 

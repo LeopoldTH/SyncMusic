@@ -2,7 +2,10 @@ import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SyncBadge } from "./SyncBadge";
 
-const base = { connected: true, waitingFor: [], waitingSinceMs: null, nowMs: 0, thresholdMs: 600 };
+const base = {
+  connected: true, waitingFor: [], waitingSinceMs: null, nowMs: 0,
+  hasPeer: true, playing: true, thresholdMs: 600,
+};
 
 describe("etat de synchronisation", () => {
   it("annonce la perte de connexion avant tout le reste", () => {
@@ -21,9 +24,23 @@ describe("etat de synchronisation", () => {
     expect(html).toContain("12 s");
   });
 
-  it("invite a partager le code quand on est seul", () => {
-    const html = renderToStaticMarkup(<SyncBadge {...base} pairGapMs={null} />);
+  it("invite a partager le code quand on est vraiment seul", () => {
+    const html = renderToStaticMarkup(<SyncBadge {...base} hasPeer={false} pairGapMs={null} />);
     expect(html).toContain("code de la room");
+  });
+
+  it("ne dit pas qu on est seul quand le second participant est la", () => {
+    // Bug observe: l en-tete annoncait "avec Toto" pendant que la pastille disait
+    // qu on attendait un second participant. Deux etats distincts, un seul message.
+    const html = renderToStaticMarkup(<SyncBadge {...base} hasPeer pairGapMs={null} />);
+    expect(html).not.toContain("En attente d un second participant");
+    expect(html).toContain("Mesure en cours");
+  });
+
+  it("dit pret a jouer quand personne ne lit encore", () => {
+    const html = renderToStaticMarkup(<SyncBadge {...base} hasPeer playing={false} pairGapMs={null} />);
+    expect(html).toContain("Pret a jouer");
+    expect(html).toContain("lancez un morceau");
   });
 
   it("dit en phase sous le seuil", () => {
