@@ -22,7 +22,10 @@ export function Queue({ items, currentItemId, onRemove }: Props) {
         const playing = item.itemId === currentItemId;
         return (
           <li key={item.itemId} className={playing ? "queue__item queue__item--playing" : "queue__item"}>
-            <span className="queue__title">{item.videoId}</span>
+            {/* Tant que le titre n est pas revenu, l identifiant tient la place. */}
+            <span className={item.title === null ? "queue__title queue__title--raw" : "queue__title"} title={item.videoId}>
+              {item.title ?? item.videoId}
+            </span>
             {playing ? (
               <span className="queue__badge">en cours</span>
             ) : (

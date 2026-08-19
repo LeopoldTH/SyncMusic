@@ -101,6 +101,11 @@ export const QueueItem = z.object({
   itemId: z.string().min(1),
   videoId: VideoId,
   addedBy: z.string().min(1),
+  /*
+   * Titre lisible. Null tant que le serveur ne l a pas recupere: un morceau doit
+   * pouvoir etre ajoute et joue meme si YouTube ne repond pas.
+   */
+  title: z.string().nullable(),
 }).strict();
 export type QueueItem = z.infer<typeof QueueItem>;
 

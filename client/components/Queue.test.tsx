@@ -4,8 +4,8 @@ import { Queue } from "./Queue";
 import type { QueueItem } from "../../shared/protocol";
 
 const items: QueueItem[] = [
-  { itemId: "q1", videoId: "kJQP7kiw5Fk", addedBy: "leo" },
-  { itemId: "q2", videoId: "dQw4w9WgXcQ", addedBy: "pote" },
+  { itemId: "q1", videoId: "kJQP7kiw5Fk", addedBy: "leo", title: "Luis Fonsi - Despacito ft. Daddy Yankee" },
+  { itemId: "q2", videoId: "dQw4w9WgXcQ", addedBy: "pote", title: null },
 ];
 
 const noop = () => {};
@@ -27,5 +27,22 @@ describe("file de lecture", () => {
   it("affiche un bouton retirer sur chaque morceau quand rien ne joue", () => {
     const html = renderToStaticMarkup(<Queue items={items} currentItemId={null} onRemove={noop} />);
     expect(html.match(/Retirer/g)).toHaveLength(2);
+  });
+});
+
+describe("titres", () => {
+  it("affiche le titre quand il est connu", () => {
+    const html = renderToStaticMarkup(<Queue items={items} currentItemId={null} onRemove={noop} />);
+    expect(html).toContain("Despacito");
+  });
+
+  it("retombe sur l identifiant tant que le titre n est pas revenu", () => {
+    const html = renderToStaticMarkup(<Queue items={items} currentItemId={null} onRemove={noop} />);
+    expect(html).toContain("dQw4w9WgXcQ");
+  });
+
+  it("garde l identifiant en infobulle, pour retrouver la video", () => {
+    const html = renderToStaticMarkup(<Queue items={items} currentItemId={null} onRemove={noop} />);
+    expect(html).toContain('title="kJQP7kiw5Fk"');
   });
 });

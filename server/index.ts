@@ -7,6 +7,7 @@
 import { WebSocketServer, type WebSocket } from "ws";
 import { parseClientMessage, type ServerMessage } from "../shared/protocol";
 import { createRegistry, type Room } from "./roomRegistry";
+import { fetchVideoTitle } from "./videoTitle";
 
 const PORT = Number(process.env["PORT"] ?? 8787);
 
@@ -127,7 +128,18 @@ wss.on("connection", (socket) => {
       case "queue_add": {
         const added = room.queueAdd(session.participantId, message.videoId, now);
         if (!added.ok) return fail(socket, added.code, added.message);
-        return broadcastState(code, room);
+        broadcastState(code, room);
+        /*
+         * Le titre arrive apres coup. Le morceau est ajoute et jouable immediatement:
+         * attendre YouTube pour afficher une ligne de file serait une regression.
+         */
+        const itemId = added.itemId;
+        void fetchVideoTitle(message.videoId).then((title: string | null) => {
+          if (title === null) return;
+          const still = registry.get(code);
+          if (still && still.setTitle(itemId, title)) broadcastState(code, still);
+        });
+        return;
       }
       case "queue_remove": {
         const removed = room.queueRemove(session.participantId, message.itemId, now);

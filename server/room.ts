@@ -136,7 +136,7 @@ export function createRoom(code: string, config: RoomConfig) {
       { ok: true; itemId: string } | Failure {
       if (!presence.has(participantId)) return fail("not_in_room", "participant inconnu dans cette room");
       const itemId = `q${nextItemId++}`;
-      queue.push({ itemId, videoId, addedBy: participantId });
+      queue.push({ itemId, videoId, addedBy: participantId, title: null });
       void nowMs;
       return { ok: true, itemId };
     },
@@ -154,6 +154,14 @@ export function createRoom(code: string, config: RoomConfig) {
       if (currentIndex !== null && index < currentIndex) currentIndex -= 1;
       void nowMs;
       return { ok: true };
+    },
+
+    /** Renseigne le titre une fois connu. Sans effet si le morceau a ete retire entre-temps. */
+    setTitle(itemId: string, title: string): boolean {
+      const item = queue.find((i) => i.itemId === itemId);
+      if (!item) return false;
+      item.title = title;
+      return true;
     },
 
     control(action: "play" | "pause" | "next" | "previous", nowMs: number): void {
