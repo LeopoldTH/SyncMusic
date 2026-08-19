@@ -101,6 +101,16 @@ export function App() {
     return () => socket.close();
   }, [handle]);
 
+  /*
+   * Une erreur s efface toute seule. Un bandeau qui reste affiche apres coup devient
+   * du decor: on finit par ne plus le lire, y compris quand il dit quelque chose.
+   */
+  useEffect(() => {
+    if (error === null) return;
+    const timer = setTimeout(() => setError(null), 6_000);
+    return () => clearTimeout(timer);
+  }, [error]);
+
   // Une horloge d affichage: la barre d etat montre une duree qui doit avancer.
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1_000);
