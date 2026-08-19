@@ -14,7 +14,7 @@ import { createClockEstimator } from "./clock";
 import { createDriftLog } from "./driftLog";
 import { decide, type Thresholds } from "./corrector";
 import { observedGapMs, targetPositionMs, type CommonStart } from "./timeline";
-import { STALL_GRACE_MS } from "./thresholds";
+import { STALE_REPORT_MS, STALL_GRACE_MS } from "./thresholds";
 import { createStallDetector } from "./stallDetector";
 
 export interface SessionDeps {
@@ -97,7 +97,16 @@ export function createSession(deps: SessionDeps) {
           if (myId === null) return;
           const mine = message.positions.find((p) => p.participantId === myId);
           const other = message.positions.find((p) => p.participantId !== myId);
-          pairGap = mine && other ? mine.positionMs - other.positionMs : null;
+          /*
+           * Deux conditions pour que le chiffre veuille dire quelque chose: les deux
+           * positions doivent etre des observations, pas des extrapolations perimees,
+           * et aucune ne doit etre trop vieille pour que le recalage serveur tienne.
+           * Sinon on affiche "inconnu" plutot qu un nombre faux.
+           */
+          const usable = (p: { fresh: boolean; ageMs: number }) => p.fresh && p.ageMs <= STALE_REPORT_MS;
+          pairGap = mine && other && usable(mine) && usable(other)
+            ? mine.positionMs - other.positionMs
+            : null;
           return;
         }
 

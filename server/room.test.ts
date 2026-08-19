@@ -276,3 +276,52 @@ describe("fin de piste", () => {
     expect(room.state().currentItemId).toBe(null);
   });
 });
+
+describe("recalage des positions rapportees", () => {
+  function playingRoomWithReports() {
+    const room = createRoom("ABCD", CFG);
+    room.join("leo", T0, "Leo");
+    room.join("pote", T0, "Pote");
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    room.control("play", T0);
+    const opened = room.resumeAt(0, T0);
+    room.ready("leo", opened.barrierId, T0);
+    room.ready("pote", opened.barrierId, T0);
+    return room;
+  }
+
+  it("ramene deux rapports decales au meme instant", () => {
+    const room = playingRoomWithReports();
+    // Les deux lecteurs sont parfaitement en phase, mais rapportent a 800 ms d ecart.
+    room.reportPosition("leo", { positionMs: 30_000, fresh: true }, T0 + 10_000);
+    room.reportPosition("pote", { positionMs: 30_800, fresh: true }, T0 + 10_800);
+
+    const peers = room.peerPositions(T0 + 10_800);
+    const leo = peers.positions.find((p) => p.participantId === "leo");
+    const pote = peers.positions.find((p) => p.participantId === "pote");
+    // Sans recalage on lirait 800 ms d ecart alors qu il n y en a aucun.
+    expect((leo?.positionMs ?? 0) - (pote?.positionMs ?? 0)).toBe(0);
+  });
+
+  it("annonce l age de chaque rapport", () => {
+    const room = playingRoomWithReports();
+    room.reportPosition("leo", { positionMs: 30_000, fresh: true }, T0 + 10_000);
+    const peers = room.peerPositions(T0 + 10_600);
+    expect(peers.positions.find((p) => p.participantId === "leo")?.ageMs).toBe(600);
+  });
+
+  it("n extrapole pas une position figee", () => {
+    const room = playingRoomWithReports();
+    room.reportPosition("leo", { positionMs: 30_000, fresh: false }, T0 + 10_000);
+    const peers = room.peerPositions(T0 + 12_000);
+    expect(peers.positions.find((p) => p.participantId === "leo")?.positionMs).toBe(30_000);
+  });
+
+  it("n extrapole pas pendant une pause", () => {
+    const room = playingRoomWithReports();
+    room.reportPosition("leo", { positionMs: 30_000, fresh: true }, T0 + 10_000);
+    room.control("pause", T0 + 10_100);
+    const peers = room.peerPositions(T0 + 20_000);
+    expect(peers.positions.find((p) => p.participantId === "leo")?.positionMs).toBe(30_000);
+  });
+});

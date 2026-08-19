@@ -175,13 +175,23 @@ export const Waiting = z.object({
   sinceServerMs: Millis,
 }).strict();
 
+/*
+ * Positions de chacun, toutes ramenees au meme instant `atServerMs`.
+ *
+ * Le recalage est indispensable: chaque client rapporte a son rythme, et soustraire
+ * deux positions relevees a une seconde d intervalle fabrique une seconde d ecart qui
+ * n existe pas. Le serveur est le seul endroit ou une horloge commune existe.
+ */
 export const PeerPositions = z.object({
   type: z.literal("peer_positions"),
   atServerMs: Millis,
   positions: z.array(z.object({
     participantId: z.string().min(1),
     positionMs: Millis.nonnegative(),
+    /** Faux quand la position rapportee etait deja une extrapolation locale perimee. */
     fresh: z.boolean(),
+    /** Age du rapport d origine, en ms. Au-dela de quelques centaines, se mefier. */
+    ageMs: Millis.nonnegative(),
   }).strict()),
 }).strict();
 

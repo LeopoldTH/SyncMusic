@@ -201,3 +201,39 @@ describe("rapport de position", () => {
     if (report?.type === "position_report") expect(report.fresh).toBe(false);
   });
 });
+
+describe("ecart par paire", () => {
+  function withPeers(mine: { positionMs: number; fresh: boolean; ageMs: number },
+                     other: { positionMs: number; fresh: boolean; ageMs: number }) {
+    const obs: PlayerObservation = { positionMs: 30_000, fresh: true, playing: true };
+    const { session } = syncedSession(obs);
+    session.onServerMessage({
+      type: "peer_positions",
+      atServerMs: 1_000,
+      positions: [
+        { participantId: "leo", ...mine },
+        { participantId: "pote", ...other },
+      ],
+    }, 1_000);
+    return session;
+  }
+
+  it("calcule l ecart quand les deux positions sont exploitables", () => {
+    const s = withPeers({ positionMs: 30_400, fresh: true, ageMs: 120 },
+                        { positionMs: 30_000, fresh: true, ageMs: 90 });
+    expect(s.pairGapMs()).toBe(400);
+  });
+
+  it("refuse de chiffrer quand une position est figee", () => {
+    const s = withPeers({ positionMs: 30_400, fresh: true, ageMs: 120 },
+                        { positionMs: 30_000, fresh: false, ageMs: 90 });
+    expect(s.pairGapMs()).toBe(null);
+  });
+
+  it("refuse de chiffrer sur un rapport trop vieux", () => {
+    // Mieux vaut afficher "inconnu" qu un nombre que personne ne peut interpreter.
+    const s = withPeers({ positionMs: 30_400, fresh: true, ageMs: 5_000 },
+                        { positionMs: 30_000, fresh: true, ageMs: 90 });
+    expect(s.pairGapMs()).toBe(null);
+  });
+});

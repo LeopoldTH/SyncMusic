@@ -52,3 +52,10 @@ export const MAX_WAIT_MS = 45_000;
  * en stagnation. Non mesure: empeche l oscillation autour de la reprise.
  */
 export const STALL_GRACE_MS = 3_000;
+
+/*
+ * Age au-dela duquel un rapport de position ne sert plus a mesurer l ecart. Le serveur
+ * recale les positions sur un instant commun, mais ce recalage suppose une lecture
+ * reguliere: plus le rapport est vieux, plus l hypothese est fragile.
+ */
+export const STALE_REPORT_MS = 2_000;

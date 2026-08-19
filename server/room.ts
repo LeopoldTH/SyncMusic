@@ -215,15 +215,27 @@ export function createRoom(code: string, config: RoomConfig) {
       positions.set(participantId, { ...report, atServerMs: nowMs });
     },
 
-    /** Source unique de l ecart par paire: un client ne voit jamais celui de l autre. */
+    /*
+     * Source unique de l ecart par paire: un client ne voit jamais celui de l autre.
+     *
+     * Chaque position est ramenee a `nowMs` avant d etre diffusee. Sans ce recalage,
+     * deux rapports arrives a une seconde d intervalle produisent une seconde d ecart
+     * apparent alors que les deux lecteurs sont parfaitement en phase.
+     */
     peerPositions(nowMs: number) {
       return {
         atServerMs: nowMs,
-        positions: [...positions.entries()].map(([participantId, r]) => ({
-          participantId,
-          positionMs: r.positionMs,
-          fresh: r.fresh,
-        })),
+        positions: [...positions.entries()].map(([participantId, r]) => {
+          const ageMs = Math.max(0, nowMs - r.atServerMs);
+          // On n extrapole que ce qui avancait vraiment: une position figee le reste.
+          const advanced = playing && r.fresh ? ageMs : 0;
+          return {
+            participantId,
+            positionMs: r.positionMs + advanced,
+            fresh: r.fresh,
+            ageMs,
+          };
+        }),
       };
     },
 
