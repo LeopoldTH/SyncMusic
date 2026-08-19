@@ -139,7 +139,12 @@ wss.on("connection", (socket) => {
         broadcastState(code, room);
         // Toute reprise passe par un depart commun (R11), sans exception.
         if (message.action === "play" || message.action === "next" || message.action === "previous") {
-          const waiting = room.resumeAt(0, now);
+          /*
+           * Reprendre la ou on s est arrete. Un changement de morceau repart de zero,
+           * une simple lecture reprend a la position figee lors de la pause.
+           */
+          const from = message.action === "play" ? room.positionNow(now) : 0;
+          const waiting = room.resumeAt(from, now);
           broadcast(code, { type: "waiting", barrierId: waiting.barrierId, positionMs: waiting.positionMs, waitingFor: waiting.waitingFor, sinceServerMs: now });
         }
         return;

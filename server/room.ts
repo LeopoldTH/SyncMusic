@@ -55,6 +55,12 @@ export function createRoom(code: string, config: RoomConfig) {
    */
   let timeline: { positionMs: number; startAtServerMs: number } | null = null;
 
+  function positionAt(nowMs: number): number {
+    if (timeline === null) return 0;
+    if (!playing) return timeline.positionMs;
+    return timeline.positionMs + Math.max(0, nowMs - timeline.startAtServerMs);
+  }
+
   function noteStart(outcome: BarrierOutcome): BarrierOutcome {
     if (outcome.kind === "start") {
       timeline = { positionMs: outcome.positionMs, startAtServerMs: outcome.startAtServerMs };
@@ -151,22 +157,37 @@ export function createRoom(code: string, config: RoomConfig) {
     },
 
     control(action: "play" | "pause" | "next" | "previous", nowMs: number): void {
-      void nowMs;
       if (action === "play") {
         if (currentIndex === null && queue.length > 0) currentIndex = 0;
+        /*
+         * Reancrer la timeline sur maintenant. Sans cela le temps ecoule pendant la
+         * pause serait compte comme de la lecture, et on reprendrait plus loin que la
+         * ou on s est arrete.
+         */
+        timeline = { positionMs: positionAt(nowMs), startAtServerMs: nowMs };
         playing = currentIndex !== null;
         return;
       }
-      if (action === "pause") { playing = false; return; }
+      if (action === "pause") {
+        /*
+         * Figer la position au moment de la pause. Sans cela le serveur ne retient que
+         * le point de depart du dernier depart commun, et la reprise repart de la.
+         */
+        timeline = { positionMs: positionAt(nowMs), startAtServerMs: nowMs };
+        playing = false;
+        return;
+      }
       if (action === "next") {
         const from = currentIndex ?? -1;
         const to = from + 1;
+        timeline = null; // un nouveau morceau repart de son debut
         if (to >= queue.length) { currentIndex = null; playing = false; return; }
         currentIndex = to;
         return;
       }
       // previous
       if (currentIndex === null) return;
+      timeline = null;
       currentIndex = Math.max(0, currentIndex - 1);
     },
 
@@ -209,9 +230,7 @@ export function createRoom(code: string, config: RoomConfig) {
 
     /** Ou en est la lecture maintenant, du point de vue du serveur. */
     positionNow(nowMs: number): number {
-      if (timeline === null) return 0;
-      if (!playing) return timeline.positionMs;
-      return timeline.positionMs + Math.max(0, nowMs - timeline.startAtServerMs);
+      return positionAt(nowMs);
     },
 
     retract(participantId: string, barrierId: number, nowMs: number): BarrierOutcome {

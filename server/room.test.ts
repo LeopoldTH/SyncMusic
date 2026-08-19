@@ -173,3 +173,48 @@ describe("arrivee en cours de lecture (F1)", () => {
     expect(room.positionNow(T0 + 60_000)).toBeLessThanOrEqual(before);
   });
 });
+
+describe("reprise apres pause", () => {
+  function playingAt(startMs: number) {
+    const room = createRoom("ABCD", CFG);
+    room.join("leo", T0);
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    room.control("play", T0);
+    const opened = room.resumeAt(startMs, T0);
+    room.ready("leo", opened.barrierId, T0);
+    return room;
+  }
+
+  it("fige la position au moment de la pause", () => {
+    const room = playingAt(0);
+    const atPause = T0 + CFG.leadMs + 30_000;
+    room.control("pause", atPause);
+    expect(room.positionNow(atPause)).toBeCloseTo(30_000, -2);
+    // Et elle ne bouge plus tant qu on ne repart pas.
+    expect(room.positionNow(atPause + 120_000)).toBeCloseTo(30_000, -2);
+  });
+
+  it("reprend la ou on s etait arrete, pas au debut", () => {
+    const room = playingAt(0);
+    const atPause = T0 + CFG.leadMs + 45_000;
+    room.control("pause", atPause);
+    room.control("play", atPause + 5_000);
+    expect(room.positionNow(atPause + 5_000)).toBeCloseTo(45_000, -2);
+  });
+
+  it("repart de zero au morceau suivant", () => {
+    const room = playingAt(0);
+    room.queueAdd("leo", "dQw4w9WgXcQ", T0);
+    room.control("pause", T0 + CFG.leadMs + 45_000);
+    room.control("next", T0 + CFG.leadMs + 46_000);
+    expect(room.positionNow(T0 + CFG.leadMs + 46_000)).toBe(0);
+  });
+
+  it("repart de zero au morceau precedent", () => {
+    const room = playingAt(0);
+    room.queueAdd("leo", "dQw4w9WgXcQ", T0);
+    room.control("next", T0 + 1_000);
+    room.control("previous", T0 + 2_000);
+    expect(room.positionNow(T0 + 2_000)).toBe(0);
+  });
+});
