@@ -23,13 +23,14 @@ function fail(code: RoomErrorCode, message: string): Failure {
 
 export interface RoomSnapshot {
   code: string;
-  participants: string[];
+  participants: Array<{ id: string; name: string }>;
   queue: QueueItem[];
   currentItemId: string | null;
   playing: boolean;
 }
 
 interface Presence {
+  name: string;
   connected: boolean;
   disconnectedAt: number | null;
 }
@@ -91,7 +92,7 @@ export function createRoom(code: string, config: RoomConfig) {
   function snapshot(): RoomSnapshot {
     return {
       code,
-      participants: [...presence.keys()],
+      participants: [...presence.entries()].map(([id, p]) => ({ id, name: p.name })),
       queue: [...queue],
       currentItemId: currentItemId(),
       playing,
@@ -101,19 +102,20 @@ export function createRoom(code: string, config: RoomConfig) {
   return {
     state: snapshot,
 
-    join(participantId: string, nowMs: number): { ok: true; state: RoomSnapshot } | Failure {
+    join(participantId: string, nowMs: number, name = "invite"): { ok: true; state: RoomSnapshot } | Failure {
       purge(nowMs);
       const existing = presence.get(participantId);
       if (existing) {
         // Reconnexion pendant le delai de grace: la room et sa file sont intactes.
         existing.connected = true;
         existing.disconnectedAt = null;
+        existing.name = name;
         return { ok: true, state: snapshot() };
       }
       if (presence.size >= config.maxParticipants) {
         return fail("room_full", "cette room accueille deja deux participants");
       }
-      presence.set(participantId, { connected: true, disconnectedAt: null });
+      presence.set(participantId, { name, connected: true, disconnectedAt: null });
       barrier.addParticipant(participantId, nowMs);
       return { ok: true, state: snapshot() };
     },
@@ -253,6 +255,16 @@ export function createRoom(code: string, config: RoomConfig) {
     resumeAt(positionMs: number, nowMs: number): Waiting {
       playing = true;
       return barrier.open({ positionMs, atServerMs: nowMs });
+    },
+
+    /*
+     * Fin de piste annoncee par un client. Idempotent: le second rapport porte
+     * l identifiant du morceau precedent, donc il ne fait rien.
+     */
+    trackEnded(itemId: string, nowMs: number): { advanced: boolean; hasNext: boolean } {
+      if (itemId !== currentItemId()) return { advanced: false, hasNext: false };
+      this.control("next", nowMs);
+      return { advanced: true, hasNext: currentItemId() !== null };
     },
 
     /** Un arrivant en cours de lecture doit passer par un depart commun (F1). */

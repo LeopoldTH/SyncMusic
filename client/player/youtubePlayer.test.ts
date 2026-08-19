@@ -137,3 +137,54 @@ describe("pannes", () => {
     expect(p.takeFault()).toBe(null);
   });
 });
+
+describe("fin de piste", () => {
+  it("signale la fin une seule fois", () => {
+    const raw = fakeRaw({ seconds: 200, state: 1 });
+    const p = createYouTubePlayer({ raw, visibleFraction: visible, hasUserGesture: gestured });
+    p.observe(0);
+    expect(p.takeEnded()).toBe(false);
+
+    raw.state = 0; // ENDED
+    p.observe(1_000);
+    expect(p.takeEnded()).toBe(true);
+    expect(p.takeEnded()).toBe(false);
+  });
+
+  it("ne re-signale pas la fin tant qu on reste sur l etat termine", () => {
+    // Sans le front montant, chaque tour renverrait une fin et le serveur avancerait
+    // la file en boucle.
+    const raw = fakeRaw({ seconds: 200, state: 0 });
+    const p = createYouTubePlayer({ raw, visibleFraction: visible, hasUserGesture: gestured });
+    p.observe(0);
+    expect(p.takeEnded()).toBe(true);
+    p.observe(1_000);
+    p.observe(2_000);
+    expect(p.takeEnded()).toBe(false);
+  });
+
+  it("re-arme la detection au chargement du morceau suivant", () => {
+    const raw = fakeRaw({ seconds: 200, state: 0 });
+    const p = createYouTubePlayer({ raw, visibleFraction: visible, hasUserGesture: gestured });
+    p.observe(0);
+    p.takeEnded();
+
+    p.load("dQw4w9WgXcQ", 1_000);
+    raw.state = 1;
+    p.observe(2_000);
+    expect(p.takeEnded()).toBe(false);
+
+    raw.state = 0;
+    p.observe(3_000);
+    expect(p.takeEnded()).toBe(true);
+  });
+
+  it("ne confond pas une pause avec une fin", () => {
+    const raw = fakeRaw({ seconds: 200, state: 1 });
+    const p = createYouTubePlayer({ raw, visibleFraction: visible, hasUserGesture: gestured });
+    p.observe(0);
+    raw.state = 2; // PAUSED
+    p.observe(1_000);
+    expect(p.takeEnded()).toBe(false);
+  });
+});

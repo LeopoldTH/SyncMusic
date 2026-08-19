@@ -20,6 +20,7 @@ function fakePlayer(observation: PlayerObservation) {
     pause: () => { calls.push("pause"); },
     load: (v) => { calls.push("load:" + v); },
     takeRateReset: () => { const p = rateReset; rateReset = false; return p; },
+    takeEnded: () => false,
     takeFault: () => null,
   };
   return port;
@@ -35,7 +36,7 @@ function syncedSession(observation: PlayerObservation) {
     send: (m) => sent.push(m),
   });
 
-  session.onServerMessage({ type: "room_state", code: "ABCD", youAre: "leo", participants: ["leo", "pote"], queue: [], currentItemId: null, playing: true }, 0);
+  session.onServerMessage({ type: "room_state", code: "ABCD", youAre: "leo", participants: [{ id: "leo", name: "Leo" }, { id: "pote", name: "Pote" }], queue: [], currentItemId: null, playing: true }, 0);
   for (let i = 0; i < 6; i++) {
     session.onServerMessage({ type: "clock_probe_reply", clientSentAt: i * 10, serverReceivedAt: i * 10 + 20, serverSentAt: i * 10 + 21 }, i * 10 + 40);
   }
@@ -130,7 +131,7 @@ describe("pause partagee", () => {
     const obs: PlayerObservation = { positionMs: 58_000, fresh: true, playing: true };
     const { session, player } = syncedSession(obs);
     session.onServerMessage(
-      { type: "room_state", code: "ABCD", youAre: "leo", participants: ["leo", "pote"], queue: [], currentItemId: null, playing: false },
+      { type: "room_state", code: "ABCD", youAre: "leo", participants: [{ id: "leo", name: "Leo" }, { id: "pote", name: "Pote" }], queue: [], currentItemId: null, playing: false },
       60_000
     );
     expect(player.calls).toContain("pause");
@@ -140,7 +141,7 @@ describe("pause partagee", () => {
     const obs: PlayerObservation = { positionMs: 58_000, fresh: true, playing: true };
     const { session, player } = syncedSession(obs);
     session.onServerMessage(
-      { type: "room_state", code: "ABCD", youAre: "leo", participants: ["leo", "pote"], queue: [], currentItemId: null, playing: false },
+      { type: "room_state", code: "ABCD", youAre: "leo", participants: [{ id: "leo", name: "Leo" }, { id: "pote", name: "Pote" }], queue: [], currentItemId: null, playing: false },
       60_000
     );
     player.calls.length = 0;
@@ -152,7 +153,7 @@ describe("pause partagee", () => {
     const obs: PlayerObservation = { positionMs: 58_000, fresh: true, playing: true };
     const { session, player } = syncedSession(obs);
     session.onServerMessage(
-      { type: "room_state", code: "ABCD", youAre: "leo", participants: ["leo", "pote"], queue: [], currentItemId: null, playing: true },
+      { type: "room_state", code: "ABCD", youAre: "leo", participants: [{ id: "leo", name: "Leo" }, { id: "pote", name: "Pote" }], queue: [], currentItemId: null, playing: true },
       60_000
     );
     expect(player.calls).not.toContain("pause");

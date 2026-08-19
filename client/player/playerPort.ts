@@ -31,5 +31,11 @@ export interface PlayerPort {
   load(videoId: string, nowMs: number): void;
   /** Le lecteur remet la vitesse a 1 au chargement: le moteur doit le savoir. */
   takeRateReset(): boolean;
+  /**
+   * Vrai une seule fois, quand le morceau vient de se terminer. Sans ce signal la
+   * position cesse d avancer, le detecteur de stagnation se declenche, la barriere
+   * rouvre a la position figee et le morceau repart: la file boucle sur son premier titre.
+   */
+  takeEnded(): boolean;
   takeFault(): PlayerFault | null;
 }

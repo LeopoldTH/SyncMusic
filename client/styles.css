@@ -313,14 +313,14 @@ button, input {
 }
 
 .join form { display: flex; gap: 8px; }
-.join input {
+.join__code {
   flex: 1; min-width: 0;
   background: var(--panel); border: 1px solid var(--line);
   border-radius: 9px; padding: 11px 14px;
   text-align: center; letter-spacing: 0.3em; text-transform: uppercase;
   font-family: ui-monospace, Menlo, monospace;
 }
-.join input::placeholder { letter-spacing: normal; text-transform: none; font-family: inherit; }
+.join__code::placeholder { letter-spacing: normal; text-transform: none; font-family: inherit; }
 
 .error {
   color: var(--bad);
@@ -342,3 +342,13 @@ button, input {
   .sync__detail { margin-left: 0; width: 100%; text-align: left; }
   .sync { flex-wrap: wrap; }
 }
+
+.join__field { display: block; text-align: left; margin-bottom: 14px; }
+.join__field span { display: block; font-size: 0.84rem; color: var(--muted); margin-bottom: 6px; }
+.join__field input {
+  width: 100%;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 9px; padding: 11px 14px;
+}
+.join__field input:focus, .join input:focus { outline: none; border-color: #3d4552; }
+.join__nudge { margin-top: 12px; }

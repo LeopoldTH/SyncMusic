@@ -28,7 +28,7 @@ describe("arrivees et departs", () => {
   it("marque un participant deconnecte sans le retirer tout de suite", () => {
     const room = roomWithTwo();
     room.disconnect("pote", T0 + 1_000);
-    expect(room.state().participants).toContain("pote");
+    expect(room.state().participants.map((p) => p.id)).toContain("pote");
     expect(room.isEmpty(T0 + 1_000)).toBe(false);
   });
 
@@ -216,5 +216,63 @@ describe("reprise apres pause", () => {
     room.control("next", T0 + 1_000);
     room.control("previous", T0 + 2_000);
     expect(room.positionNow(T0 + 2_000)).toBe(0);
+  });
+});
+
+describe("pseudos", () => {
+  it("retient le pseudo de chaque participant", () => {
+    const room = createRoom("ABCD", CFG);
+    room.join("leo", T0, "Leo");
+    room.join("pote", T0, "Bibou");
+    expect(room.state().participants).toEqual([
+      { id: "leo", name: "Leo" },
+      { id: "pote", name: "Bibou" },
+    ]);
+  });
+
+  it("met le pseudo a jour a la reconnexion", () => {
+    const room = createRoom("ABCD", CFG);
+    room.join("leo", T0, "Leo");
+    room.disconnect("leo", T0);
+    room.join("leo", T0 + 1_000, "Leopold");
+    expect(room.state().participants[0]?.name).toBe("Leopold");
+  });
+});
+
+describe("fin de piste", () => {
+  function twoTracks() {
+    const room = createRoom("ABCD", CFG);
+    room.join("leo", T0, "Leo");
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    room.queueAdd("leo", "dQw4w9WgXcQ", T0);
+    room.control("play", T0);
+    return room;
+  }
+
+  it("avance au morceau suivant", () => {
+    const room = twoTracks();
+    const first = room.state().currentItemId;
+    const outcome = room.trackEnded(first ?? "", T0 + 1_000);
+    expect(outcome).toEqual({ advanced: true, hasNext: true });
+    expect(room.state().currentItemId).not.toBe(first);
+  });
+
+  it("ignore un second rapport pour le meme morceau", () => {
+    // Les deux clients annoncent la fin: le serveur ne doit avancer qu une fois.
+    const room = twoTracks();
+    const first = room.state().currentItemId ?? "";
+    room.trackEnded(first, T0 + 1_000);
+    const second = room.trackEnded(first, T0 + 1_100);
+    expect(second.advanced).toBe(false);
+    expect(room.state().currentItemId).toBe("q2");
+  });
+
+  it("arrete la lecture a la fin de la file", () => {
+    const room = twoTracks();
+    room.trackEnded(room.state().currentItemId ?? "", T0 + 1_000);
+    const last = room.trackEnded(room.state().currentItemId ?? "", T0 + 2_000);
+    expect(last).toEqual({ advanced: true, hasNext: false });
+    expect(room.state().playing).toBe(false);
+    expect(room.state().currentItemId).toBe(null);
   });
 });

@@ -94,7 +94,7 @@ wss.on("connection", (socket) => {
 
     if (message.type === "create_room") {
       const { code, room } = registry.create(now);
-      room.join(session.participantId, now);
+      room.join(session.participantId, now, message.name);
       session.code = code;
       return broadcastState(code, room);
     }
@@ -102,7 +102,7 @@ wss.on("connection", (socket) => {
     if (message.type === "join_room") {
       const room = registry.get(message.code);
       if (!room) return fail(socket, "room_not_found", "aucune room ne porte ce code");
-      const joined = room.join(session.participantId, now);
+      const joined = room.join(session.participantId, now, message.name);
       if (!joined.ok) return fail(socket, joined.code, joined.message);
       session.code = message.code;
       broadcastState(message.code, room);
@@ -140,6 +140,17 @@ wss.on("connection", (socket) => {
           if (still && still.setTitle(itemId, title)) broadcastState(code, still);
         });
         return;
+      }
+      case "track_ended": {
+        const outcome = room.trackEnded(message.itemId, now);
+        if (!outcome.advanced) return; // rapport en double: le morceau a deja change
+        broadcastState(code, room);
+        if (!outcome.hasNext) return;  // file terminee: la lecture s arrete (R7)
+        const waiting = room.resumeAt(0, now);
+        return broadcast(code, {
+          type: "waiting", barrierId: waiting.barrierId, positionMs: waiting.positionMs,
+          waitingFor: waiting.waitingFor, sinceServerMs: now,
+        });
       }
       case "queue_remove": {
         const removed = room.queueRemove(session.participantId, message.itemId, now);

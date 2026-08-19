@@ -20,11 +20,18 @@ const VideoId = z.string().regex(/^[\w-]{11}$/, "identifiant de video YouTube: o
 
 /* --- Client vers serveur --------------------------------------------------- */
 
-export const CreateRoom = z.object({ type: z.literal("create_room") }).strict();
+/** Pseudo choisi par l utilisateur. Borne pour qu il tienne dans l interface. */
+const Pseudo = z.string().trim().min(1, "choisis un pseudo").max(20, "pseudo trop long");
+
+export const CreateRoom = z.object({
+  type: z.literal("create_room"),
+  name: Pseudo,
+}).strict();
 
 export const JoinRoom = z.object({
   type: z.literal("join_room"),
   code: RoomCode,
+  name: Pseudo,
 }).strict();
 
 export const QueueAdd = z.object({
@@ -89,9 +96,18 @@ export const PositionReport = z.object({
   fresh: z.boolean(),
 }).strict();
 
+/*
+ * Fin de piste. Les deux clients l annoncent, le serveur n avance qu une fois: le
+ * second rapport porte l identifiant du morceau precedent et se trouve ignore.
+ */
+export const TrackEnded = z.object({
+  type: z.literal("track_ended"),
+  itemId: z.string().min(1),
+}).strict();
+
 export const ClientMessage = z.discriminatedUnion("type", [
   CreateRoom, JoinRoom, QueueAdd, QueueRemove, ControlTransport, ControlSeek,
-  ClockProbe, Ready, RetractReady, Stall, PositionReport,
+  ClockProbe, Ready, RetractReady, Stall, PositionReport, TrackEnded,
 ]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
 
@@ -109,11 +125,17 @@ export const QueueItem = z.object({
 }).strict();
 export type QueueItem = z.infer<typeof QueueItem>;
 
+export const Participant = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+}).strict();
+export type Participant = z.infer<typeof Participant>;
+
 export const RoomState = z.object({
   type: z.literal("room_state"),
   code: RoomCode,
   youAre: z.string().min(1),
-  participants: z.array(z.string().min(1)),
+  participants: z.array(Participant),
   queue: z.array(QueueItem),
   currentItemId: z.string().min(1).nullable(),
   playing: z.boolean(),

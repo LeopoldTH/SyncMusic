@@ -29,6 +29,7 @@ export function createSession(deps: SessionDeps) {
   const { player, clock, log, thresholds, send } = deps;
 
   let myId: string | null = null;
+  let currentItemId: string | null = null;
   let start: CommonStart | null = null;
   let pending: { barrierId: number; positionMs: number } | null = null;
   let inFlight: { endsAtMs: number } | null = null;
@@ -48,6 +49,7 @@ export function createSession(deps: SessionDeps) {
       switch (message.type) {
         case "room_state":
           myId = message.youAre;
+          currentItemId = message.currentItemId;
           /*
            * La pause doit atteindre le lecteur. Sans cette ligne l etat partage change,
            * l interface l affiche, et la musique continue de jouer chez les deux.
@@ -131,6 +133,17 @@ export function createSession(deps: SessionDeps) {
 
       // Une vitesse remise a 1 par un changement de morceau annule la correction en cours.
       if (player.takeRateReset()) inFlight = null;
+
+      /*
+       * Fin de piste: on le dit au serveur, qui avance la file. Sans cela la position
+       * gele, le detecteur de stagnation prend le relais, et le morceau repart au lieu
+       * de laisser la place au suivant.
+       */
+      if (player.takeEnded() && currentItemId !== null) {
+        start = null;
+        send({ type: "track_ended", itemId: currentItemId });
+        return;
+      }
 
       if (pending !== null) {
         // On ne se declare pret qu une fois l estimation d horloge convergee (R12):

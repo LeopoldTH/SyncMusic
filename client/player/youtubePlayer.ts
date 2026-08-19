@@ -36,6 +36,7 @@ export interface AdapterOptions {
   staleAfterMs?: number;
 }
 
+const ENDED = 0;
 const PLAYING = 1;
 
 export function createYouTubePlayer(options: AdapterOptions): PlayerPort {
@@ -49,11 +50,18 @@ export function createYouTubePlayer(options: AdapterOptions): PlayerPort {
   let fault: PlayerFault | null = null;
   let hasStartedOnce = false;
   let playRequestedAtMs: number | null = null;
+  let endedPending = false;
+  let wasEnded = false;
 
   return {
     observe(nowMs: number): PlayerObservation {
       const positionMs = raw.getCurrentTime() * 1000;
-      const playing = raw.getPlayerState() === PLAYING;
+      const state = raw.getPlayerState();
+      const playing = state === PLAYING;
+
+      // Front montant seulement: l etat reste a ENDED tant qu on ne charge rien d autre.
+      if (state === ENDED && !wasEnded) endedPending = true;
+      wasEnded = state === ENDED;
 
       // Un ordre de lecture qui n aboutit pas au tour suivant est un refus du
       // navigateur. playVideo() ne rend aucune promesse: c est le seul signal.
@@ -116,6 +124,8 @@ export function createYouTubePlayer(options: AdapterOptions): PlayerPort {
     load(videoId: string, nowMs: number): void {
       raw.loadVideoById(videoId);
       rateResetPending = true;
+      endedPending = false;
+      wasEnded = false;
       lastPositionMs = null;
       lastAdvanceAtMs = nowMs;
       echoUntilMs = nowMs + staleAfterMs;
@@ -124,6 +134,12 @@ export function createYouTubePlayer(options: AdapterOptions): PlayerPort {
     takeRateReset(): boolean {
       const pending = rateResetPending;
       rateResetPending = false;
+      return pending;
+    },
+
+    takeEnded(): boolean {
+      const pending = endedPending;
+      endedPending = false;
       return pending;
     },
 

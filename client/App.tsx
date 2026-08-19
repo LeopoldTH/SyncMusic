@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { QueueItem, ServerMessage } from "../shared/protocol";
+import type { Participant, QueueItem, ServerMessage } from "../shared/protocol";
 import { connect, type Transport } from "./transport/socket";
 import { loadYouTubeApi } from "./player/loadYouTubeApi";
 import { createYouTubePlayer, faultFromErrorCode } from "./player/youtubePlayer";
@@ -22,7 +22,7 @@ import type { DriftPoint } from "./sync/driftLog";
 interface RoomView {
   code: string;
   youAre: string;
-  participants: string[];
+  participants: Participant[];
   queue: QueueItem[];
   currentItemId: string | null;
   playing: boolean;
@@ -39,6 +39,7 @@ export function App() {
   const [now, setNow] = useState(() => Date.now());
   const [pairGap, setPairGap] = useState<number | null>(null);
   const [drift, setDrift] = useState<readonly DriftPoint[]>([]);
+  const [pseudo, setPseudo] = useState(() => window.localStorage.getItem("syncmusic.pseudo") ?? "");
   const [latencyMs, setLatencyMs] = useState(() => {
     const stored = window.localStorage.getItem("syncmusic.latencyMs");
     return stored === null ? 0 : Number(stored);
@@ -227,10 +228,15 @@ export function App() {
     : undefined;
 
   if (room === null) {
+    const remember = (name: string) => {
+      window.localStorage.setItem("syncmusic.pseudo", name);
+      setPseudo(name);
+    };
     return (
       <RoomJoin
-        onCreate={() => send?.({ type: "create_room" })}
-        onJoin={(code) => send?.({ type: "join_room", code })}
+        initialName={pseudo}
+        onCreate={(name) => { remember(name); send?.({ type: "create_room", name }); }}
+        onJoin={(code, name) => { remember(name); send?.({ type: "join_room", code, name }); }}
         error={error}
       />
     );
@@ -245,6 +251,10 @@ export function App() {
   }
 
   const current = room.queue.find((q) => q.itemId === room.currentItemId) ?? null;
+  /* Un identifiant technique ne doit jamais atteindre l ecran. */
+  const nameOf = (id: string): string =>
+    id === room.youAre ? "toi" : room.participants.find((p) => p.id === id)?.name ?? "ton pote";
+  const others = room.participants.filter((p) => p.id !== room.youAre);
 
   return (
     <div className="shell">
@@ -252,13 +262,13 @@ export function App() {
         <span className="top__brand">SyncMusic</span>
         <RoomCode code={room.code} />
         <span className="peers">
-          {room.participants.length === 1 ? "toi seul" : `${room.participants.length} connectes`}
+          {others.length === 0 ? "toi seul" : `avec ${others.map((p) => p.name).join(", ")}`}
         </span>
       </header>
 
       <SyncBadge
         connected={connected}
-        waitingFor={waitingFor}
+        waitingFor={waitingFor.map(nameOf)}
         waitingSinceMs={waitingSince}
         nowMs={now}
         pairGapMs={pairGap}
@@ -273,7 +283,7 @@ export function App() {
           ) : (
             <>
               <h1 className="now__title">{current.title ?? current.videoId}</h1>
-              <p className="now__by">ajoute par {current.addedBy === room.youAre ? "toi" : "ton pote"}</p>
+              <p className="now__by">ajoute par {nameOf(current.addedBy)}</p>
             </>
           )}
         </div>
@@ -316,7 +326,7 @@ export function App() {
         <Queue
           items={room.queue}
           currentItemId={room.currentItemId}
-          youAre={room.youAre}
+          nameOf={nameOf}
           onRemove={(itemId) => send?.({ type: "queue_remove", itemId })}
         />
       </section>

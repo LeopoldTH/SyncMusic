@@ -1,20 +1,42 @@
 import { useState } from "react";
 
 interface Props {
-  onCreate: () => void;
-  onJoin: (code: string) => void;
+  initialName: string;
+  onCreate: (name: string) => void;
+  onJoin: (code: string, name: string) => void;
   error: string | null;
 }
 
-export function RoomJoin({ onCreate, onJoin, error }: Props) {
+export function RoomJoin({ initialName, onCreate, onJoin, error }: Props) {
+  const [name, setName] = useState(initialName);
   const [code, setCode] = useState("");
+
+  const pseudo = name.trim();
+  const ready = pseudo.length > 0;
 
   return (
     <main className="join">
       <h1>SyncMusic</h1>
       <p className="join__baseline">La meme musique, au meme instant, chacun chez soi.</p>
 
-      <button type="button" className="btn btn--primary" onClick={onCreate}>
+      <label className="join__field">
+        <span>Ton pseudo</span>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Leo"
+          maxLength={20}
+          autoComplete="nickname"
+          aria-label="Ton pseudo"
+        />
+      </label>
+
+      <button
+        type="button"
+        className="btn btn--primary"
+        onClick={() => onCreate(pseudo)}
+        disabled={!ready}
+      >
         Creer une room
       </button>
 
@@ -24,10 +46,11 @@ export function RoomJoin({ onCreate, onJoin, error }: Props) {
         onSubmit={(e) => {
           e.preventDefault();
           const cleaned = code.trim().toUpperCase();
-          if (cleaned.length > 0) onJoin(cleaned);
+          if (cleaned.length > 0 && ready) onJoin(cleaned, pseudo);
         }}
       >
         <input
+          className="join__code"
           value={code}
           onChange={(e) => setCode(e.target.value)}
           placeholder="Code a quatre lettres"
@@ -35,9 +58,10 @@ export function RoomJoin({ onCreate, onJoin, error }: Props) {
           autoComplete="off"
           aria-label="Code de room"
         />
-        <button type="submit" className="btn">Rejoindre</button>
+        <button type="submit" className="btn" disabled={!ready}>Rejoindre</button>
       </form>
 
+      {ready ? null : <p className="hint join__nudge">Choisis un pseudo pour commencer.</p>}
       {error === null ? null : <p className="error">{error}</p>}
     </main>
   );
