@@ -13,7 +13,7 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["node", "vitest/globals"]
+    "types": ["node", "vitest/globals", "vite/client"]
   },
   "include": ["shared", "server", "client", "tools"],
   "exclude": ["node_modules", "dist", "spike"]

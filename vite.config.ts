@@ -7,5 +7,10 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   root: "client",
   plugins: [react()],
-  server: { port: 5173 },
+  server: {
+    port: 5173,
+    // En developpement le client et le serveur vivent sur deux ports. Le renvoi evite
+    // de coder une adresse en dur, ce que U10 interdit.
+    proxy: { "/ws": { target: "ws://localhost:8787", ws: true } },
+  },
 });
