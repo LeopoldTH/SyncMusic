@@ -9,7 +9,9 @@
     "dev": "vite",
     "build": "vite build",
     "sim": "tsx tools/simulate.ts",
-    "dev:server": "tsx server/index.ts"
+    "dev:server": "tsx server/index.ts",
+    "start": "tsx server/index.ts",
+    "serve": "npm run build && npm start"
   },
   "dependencies": {
     "react": "^18.3.1",

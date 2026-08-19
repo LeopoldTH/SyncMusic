@@ -5,10 +5,14 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { createServer } from "node:http";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 import { parseClientMessage, type ServerMessage } from "../shared/protocol";
 import { createRegistry, type Room } from "./roomRegistry";
 import { fetchVideoTitle } from "./videoTitle";
+import { createStaticHandler } from "./static";
 
 const PORT = Number(process.env["PORT"] ?? 8787);
 
@@ -75,8 +79,19 @@ const MAX_ROOMS = 500;
 const MAX_MESSAGES_PER_10S = 200;
 const ALLOWED_ORIGIN = process.env["ALLOWED_ORIGIN"] ?? null;
 
+/*
+ * Un seul port sert l application et les connexions temps reel. C est ce qui permet de
+ * n exposer qu un tunnel, et c est aussi la forme que prendra le deploiement.
+ */
+const distDir = join(dirname(fileURLToPath(import.meta.url)), "..", "dist");
+const serveStatic = createStaticHandler(distDir);
+
+const http = createServer((request, response) => {
+  void serveStatic(request, response);
+});
+
 const wss = new WebSocketServer({
-  port: PORT,
+  server: http,
   maxPayload: MAX_PAYLOAD_BYTES,
   /*
    * Sans verification d origine, n importe quel site peut ouvrir une connexion vers
@@ -281,4 +296,9 @@ setInterval(() => {
 
 setInterval(() => registry.sweep(Date.now()), SWEEP_MS);
 
-console.log(`SyncMusic: serveur de rooms sur le port ${PORT}`);
+http.listen(PORT, () => {
+  console.log(`SyncMusic sur http://localhost:${PORT}`);
+  if (ALLOWED_ORIGIN === null) {
+    console.log("ALLOWED_ORIGIN non defini: toute origine est acceptee (developpement).");
+  }
+});

@@ -7,6 +7,8 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   root: "client",
   plugins: [react()],
+  // Sortie a la racine du projet: c est le serveur qui la sert, pas Vite.
+  build: { outDir: "../dist", emptyOutDir: true },
   server: {
     port: 5173,
     // En developpement le client et le serveur vivent sur deux ports. Le renvoi evite
