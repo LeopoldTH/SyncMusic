@@ -11,8 +11,9 @@ import { parseVideoId } from "./lib/videoId";
 import { resolveServerUrl } from "./lib/serverUrl";
 import { RoomJoin } from "./components/RoomJoin";
 import { Queue } from "./components/Queue";
-import { Controls } from "./components/Controls";
-import { StatusBar } from "./components/StatusBar";
+import { Transport as TransportBar } from "./components/Transport";
+import { SyncBadge } from "./components/SyncBadge";
+import { RoomCode } from "./components/RoomCode";
 import { PlayerFrame } from "./components/PlayerFrame";
 import { DriftChart } from "./components/DriftChart";
 import { LatencyCalibration } from "./components/LatencyCalibration";
@@ -233,59 +234,89 @@ export function App() {
     setError(null);
   }
 
+  const current = room.queue.find((q) => q.itemId === room.currentItemId) ?? null;
+
   return (
-    <main className="app">
-      <header className="app__header">
-        <span className="app__code">Room {room.code}</span>
-        <span className="app__peers">{room.participants.length} participant(s)</span>
+    <div className="shell">
+      <header className="top">
+        <span className="top__brand">SyncMusic</span>
+        <RoomCode code={room.code} />
+        <span className="peers">
+          {room.participants.length === 1 ? "toi seul" : `${room.participants.length} connectes`}
+        </span>
       </header>
 
-      <StatusBar
+      <SyncBadge
         connected={connected}
         waitingFor={waitingFor}
         waitingSinceMs={waitingSince}
         nowMs={now}
         pairGapMs={pairGap}
+        thresholdMs={SYNC_THRESHOLDS.floorMs * 2}
       />
 
-      <PlayerFrame />
-
-      <Controls
-        playing={room.playing}
-        disabled={room.queue.length === 0}
-        onPlay={() => send?.({ type: "control_transport", action: "play" })}
-        onPause={() => send?.({ type: "control_transport", action: "pause" })}
-        onNext={() => send?.({ type: "control_transport", action: "next" })}
-        onPrevious={() => send?.({ type: "control_transport", action: "previous" })}
-      />
-
-      <form
-        className="add"
-        onSubmit={(e) => {
-          e.preventDefault();
-          addFromLink();
-        }}
-      >
-        <input
-          value={link}
-          onChange={(e) => setLink(e.target.value)}
-          placeholder="Lien YouTube ou identifiant"
-          aria-label="Lien YouTube"
+      <section className="stage">
+        <PlayerFrame />
+        <div className="now">
+          {current === null ? (
+            <h1 className="now__title now__title--idle">Rien en lecture</h1>
+          ) : (
+            <>
+              <h1 className="now__title">{current.title ?? current.videoId}</h1>
+              <p className="now__by">ajoute par {current.addedBy}</p>
+            </>
+          )}
+        </div>
+        <TransportBar
+          playing={room.playing}
+          disabled={room.queue.length === 0}
+          onPlay={() => send?.({ type: "control_transport", action: "play" })}
+          onPause={() => send?.({ type: "control_transport", action: "pause" })}
+          onNext={() => send?.({ type: "control_transport", action: "next" })}
+          onPrevious={() => send?.({ type: "control_transport", action: "previous" })}
         />
-        <button type="submit">Ajouter</button>
-      </form>
+      </section>
 
-      {error === null ? null : <p className="error">{error}</p>}
+      <section className="queue-panel">
+        <div className="queue-panel__head">
+          <h2>La file</h2>
+          <span className="queue-panel__count">
+            {room.queue.length === 0 ? "vide" : `${room.queue.length} morceau${room.queue.length > 1 ? "x" : ""}`}
+          </span>
+        </div>
 
-      <Queue
-        items={room.queue}
-        currentItemId={room.currentItemId}
-        onRemove={(itemId) => send?.({ type: "queue_remove", itemId })}
-      />
+        <form
+          className="add"
+          onSubmit={(e) => {
+            e.preventDefault();
+            addFromLink();
+          }}
+        >
+          <input
+            value={link}
+            onChange={(e) => setLink(e.target.value)}
+            placeholder="Colle un lien YouTube"
+            aria-label="Lien YouTube"
+          />
+          <button type="submit" className="btn">Ajouter</button>
+        </form>
 
-      <DriftChart points={drift} thresholdMs={SYNC_THRESHOLDS.floorMs * 2} />
+        {error === null ? null : <p className="error">{error}</p>}
 
-      <LatencyCalibration valueMs={latencyMs} onChange={setLatencyMs} />
-    </main>
+        <Queue
+          items={room.queue}
+          currentItemId={room.currentItemId}
+          onRemove={(itemId) => send?.({ type: "queue_remove", itemId })}
+        />
+      </section>
+
+      <details className="diag">
+        <summary>Reglages et mesures</summary>
+        <div className="diag__body">
+          <LatencyCalibration valueMs={latencyMs} onChange={setLatencyMs} />
+          <DriftChart points={drift} thresholdMs={SYNC_THRESHOLDS.floorMs * 2} />
+        </div>
+      </details>
+    </div>
   );
 }

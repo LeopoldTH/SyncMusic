@@ -22,8 +22,11 @@ describe("courbe de derive", () => {
     const points = [point(0, 100), point(1000, 250), point(2000, 480)];
     const html = renderToStaticMarkup(<DriftChart points={points} thresholdMs={600} />);
     expect(html).toContain("480 ms");
-    expect(html).toContain("seuil 600 ms");
-    expect(html).toContain("3 mesures");
+    expect(html).toContain("600 ms");
+    // La legende doit dire ce qu on regarde: la premiere version ne le disait pas,
+    // et il a fallu l expliquer de vive voix.
+    expect(html).toContain("Ecart entre vous deux");
+    expect(html).toContain("Plus la courbe est basse");
   });
 
   it("garde le seuil dans l echelle meme quand la derive reste faible", () => {

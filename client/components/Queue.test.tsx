@@ -13,20 +13,20 @@ const noop = () => {};
 describe("file de lecture", () => {
   it("invite a ajouter quand la file est vide", () => {
     const html = renderToStaticMarkup(<Queue items={[]} currentItemId={null} onRemove={noop} />);
-    expect(html).toContain("La file est vide");
+    expect(html).toContain("Rien dans la file");
     expect(html).toContain("Colle un lien YouTube");
   });
 
   it("n affiche pas de bouton retirer sur le morceau en cours", () => {
     const html = renderToStaticMarkup(<Queue items={items} currentItemId="q1" onRemove={noop} />);
     // Un seul bouton Retirer, pour le second morceau.
-    expect(html.match(/Retirer/g)).toHaveLength(1);
-    expect(html).toContain("en cours");
+    expect(html.match(/class="queue__remove"/g)).toHaveLength(1);
+    expect(html).toContain("queue__item--playing");
   });
 
   it("affiche un bouton retirer sur chaque morceau quand rien ne joue", () => {
     const html = renderToStaticMarkup(<Queue items={items} currentItemId={null} onRemove={noop} />);
-    expect(html.match(/Retirer/g)).toHaveLength(2);
+    expect(html.match(/class="queue__remove"/g)).toHaveLength(2);
   });
 });
 
