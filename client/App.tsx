@@ -157,6 +157,9 @@ export function App() {
               session.current.onServerMessage(pending.message, pending.atMs);
             }
             early.current = [];
+            if (import.meta.env.DEV) {
+              (window as unknown as { sm?: unknown }).sm = session.current;
+            }
             setPlayerReady(true);
           },
           onError: (event) => {

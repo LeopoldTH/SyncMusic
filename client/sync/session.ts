@@ -199,5 +199,17 @@ export function createSession(deps: SessionDeps) {
     correcting(): boolean {
       return inFlight !== null;
     },
+
+    /** Etat interne, pour le diagnostic depuis la console. */
+    debug() {
+      return {
+        myId,
+        pending,
+        hasStart: start !== null,
+        clock: clock.estimate(),
+        outputLatencyMs,
+        stallAnnounced,
+      };
+    },
   };
 }
