@@ -263,7 +263,7 @@ export function App() {
           ) : (
             <>
               <h1 className="now__title">{current.title ?? current.videoId}</h1>
-              <p className="now__by">ajoute par {current.addedBy}</p>
+              <p className="now__by">ajoute par {current.addedBy === room.youAre ? "toi" : "ton pote"}</p>
             </>
           )}
         </div>
@@ -306,6 +306,7 @@ export function App() {
         <Queue
           items={room.queue}
           currentItemId={room.currentItemId}
+          youAre={room.youAre}
           onRemove={(itemId) => send?.({ type: "queue_remove", itemId })}
         />
       </section>

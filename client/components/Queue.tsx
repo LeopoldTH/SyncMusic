@@ -3,10 +3,20 @@ import type { QueueItem } from "../../shared/protocol";
 interface Props {
   items: QueueItem[];
   currentItemId: string | null;
+  /** Identifiant du participant local, pour ne jamais afficher d identifiant technique. */
+  youAre: string;
   onRemove: (itemId: string) => void;
 }
 
-export function Queue({ items, currentItemId, onRemove }: Props) {
+/*
+ * Les identifiants de participants sont des chaines aleatoires. A deux, il n y a que
+ * deux reponses possibles a "qui a ajoute ca", et aucune des deux n est un identifiant.
+ */
+function who(addedBy: string, youAre: string): string {
+  return addedBy === youAre ? "toi" : "ton pote";
+}
+
+export function Queue({ items, currentItemId, youAre, onRemove }: Props) {
   if (items.length === 0) {
     return (
       <div className="empty">
@@ -32,7 +42,7 @@ export function Queue({ items, currentItemId, onRemove }: Props) {
               >
                 {item.title ?? item.videoId}
               </span>
-              <span className="queue__by">ajoute par {item.addedBy}</span>
+              <span className="queue__by">ajoute par {who(item.addedBy, youAre)}</span>
             </span>
 
             {playing ? null : (
