@@ -98,3 +98,46 @@ Première tentative invalidée par un défaut du banc de mesure : la vidéo cont
 Ce que la tentative montre malgré tout : **aucun écart négatif**, donc aucun recalage visible sur une keyframe antérieure, et `allowSeekAhead=false` **a bel et bien effectué le saut** hors zone supposée chargée, alors que la documentation laisse entendre le contraire.
 
 Le banc met désormais la lecture en pause avant de mesurer. **À relancer.**
+
+---
+
+## 6. Seuil audible entre participants — À MESURER (U7)
+
+Ce que ça détermine : la valeur de R13, et par dérivation le plafond au-delà duquel on saute au lieu de corriger par la vitesse. Le plan interdit de le supposer.
+
+**Pourquoi ça ne se déduit pas.** Vous n'êtes pas dans la même pièce. Vous ne percevez aucun déphasage acoustique, seulement un décalage de conversation : l'un réagit à un passage que l'autre n'a pas encore entendu. Votre seuil est donc bien plus large que les 40 à 60 millisecondes que visent les projets de la littérature, et il ne peut venir que de vous.
+
+**Protocole.** Lancez une room à deux, chacun chez soi, en conditions réelles (enceintes habituelles, réglage de latence fait). L'un décale volontairement sa position d'une valeur connue, croissante, et l'autre dit à partir de quand il le remarque en parlant normalement de la musique.
+
+| Décalage imposé | Remarqué par le participant A | Remarqué par le participant B |
+|---|---|---|
+| 200 ms | | |
+| 400 ms | | |
+| 600 ms | | |
+| 1000 ms | | |
+| 1500 ms | | |
+| 2500 ms | | |
+
+**Seuil retenu pour R13 :**
+
+**Plafond dérivé pour l'étage saut :**
+
+---
+
+## 7. Audibilité de la correction par vitesse — À MESURER (U7)
+
+Ce que ça détermine : si l'étage intermédiaire tient sa promesse. Les auteurs de Jellyfin ont écrit dans leur propre code que cette correction *sonne mal sur les chansons*, et l'ont désactivée par défaut. C'est la seule prémisse de KTD2 qui reste non vérifiée.
+
+**Protocole.** Sur un morceau chanté, appliquer une correction à chacune des vitesses ci-dessous pendant dix secondes, et noter si elle s'entend.
+
+| Vitesse | Écart qu'elle résorbe en 10 s | S'entend-elle sur du chanté |
+|---|---|---|
+| 1,05 | 500 ms | |
+| 1,10 | 1000 ms | |
+| 1,15 | 1500 ms | |
+| 1,20 | 2000 ms | |
+| 1,25 | 2500 ms | |
+
+**Vitesse maximale jugée acceptable :**
+
+**Conséquence sur la fenêtre de résorption :** si la vitesse acceptable est plus basse que prévu, c'est la fenêtre qu'il faut allonger, pas la correction qu'il faut abandonner.

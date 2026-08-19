@@ -21,6 +21,8 @@ export interface BarrierConfig {
 export interface Waiting {
   kind: "waiting";
   barrierId: number;
+  /** Ou chaque participant doit se placer avant de se declarer pret. */
+  positionMs: number;
   waitingFor: string[];
 }
 
@@ -46,6 +48,7 @@ export function createBarrier(config: BarrierConfig) {
     return {
       kind: "waiting",
       barrierId,
+      positionMs,
       waitingFor: [...participants].filter((p) => !ready.has(p)),
     };
   }

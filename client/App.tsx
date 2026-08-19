@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { QueueItem, ServerMessage } from "../shared/protocol";
 import { connect, type Transport } from "./transport/socket";
+import { loadYouTubeApi } from "./player/loadYouTubeApi";
+import { createYouTubePlayer, faultFromErrorCode } from "./player/youtubePlayer";
+import { createClockEstimator } from "./sync/clock";
+import { createDriftLog } from "./sync/driftLog";
+import { createSession } from "./sync/session";
+import { LOOP_MS, SYNC_THRESHOLDS } from "./sync/thresholds";
 import { parseVideoId } from "./lib/videoId";
 import { resolveServerUrl } from "./lib/serverUrl";
 import { RoomJoin } from "./components/RoomJoin";
@@ -27,8 +33,14 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [link, setLink] = useState("");
   const [now, setNow] = useState(() => Date.now());
+  const [pairGap, setPairGap] = useState<number | null>(null);
+  const session = useRef<ReturnType<typeof createSession> | null>(null);
+  const port = useRef<ReturnType<typeof createYouTubePlayer> | null>(null);
+  const playerReady = useRef(false);
+  const loadedVideo = useRef<string | null>(null);
 
   const handle = useCallback((message: ServerMessage) => {
+    session.current?.onServerMessage(message, Date.now());
     switch (message.type) {
       case "room_state":
         setRoom({
@@ -46,7 +58,6 @@ export function App() {
         setWaitingSince((previous) => previous ?? Date.now());
         return;
       case "common_start":
-        // Le branchement du moteur sur ce message est l unite suivante.
         setWaitingFor([]);
         setWaitingSince(null);
         return;
@@ -73,6 +84,77 @@ export function App() {
   // Une horloge d affichage: la barre d etat montre une duree qui doit avancer.
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Creation du lecteur et de la session, une seule fois, une fois la room rejointe.
+  useEffect(() => {
+    if (room === null || playerReady.current) return;
+    let cancelled = false;
+
+    void loadYouTubeApi().then((Player) => {
+      if (cancelled) return;
+      const raw = new Player("yt-player", {
+        playerVars: { rel: 0, playsinline: 1 },
+        events: {
+          onError: (event) => {
+            const fault = faultFromErrorCode(event.data);
+            setError(
+              fault.kind === "referer_missing"
+                ? "Le lecteur YouTube refuse de demarrer: en-tete Referer absent (erreur 153)."
+                : `Le lecteur YouTube a renvoye l erreur ${event.data}.`
+            );
+          },
+        },
+      });
+
+      port.current = createYouTubePlayer({
+        raw,
+        // Fraction visible du lecteur: la lecture automatique n est permise au premier
+        // demarrage que si plus de la moitie du cadre est a l ecran.
+        visibleFraction: () => {
+          const el = document.getElementById("yt-player");
+          if (!el || document.hidden) return 0;
+          const box = el.getBoundingClientRect();
+          const shown = Math.max(0, Math.min(box.bottom, window.innerHeight) - Math.max(box.top, 0));
+          return box.height === 0 ? 0 : shown / box.height;
+        },
+      });
+
+      session.current = createSession({
+        player: port.current,
+        clock: createClockEstimator(),
+        log: createDriftLog(),
+        thresholds: SYNC_THRESHOLDS,
+        send: (message) => transport.current?.send(message),
+      });
+      playerReady.current = true;
+    });
+
+    return () => { cancelled = true; };
+  }, [room]);
+
+  /*
+   * Chargement du morceau courant. Le lecteur remet la vitesse a 1 au chargement:
+   * l adaptateur le signale, et la session annule sa correction en cours.
+   */
+  useEffect(() => {
+    const item = room?.queue.find((q) => q.itemId === room.currentItemId);
+    const videoId = item?.videoId ?? null;
+    if (videoId === null || videoId === loadedVideo.current || !port.current) return;
+    loadedVideo.current = videoId;
+    port.current.load(videoId, Date.now());
+  }, [room]);
+
+  // La boucle de synchronisation. Sa cadence vient de la mesure du 2026-08-19:
+  // en onglet arriere-plan les minuteries tombent a une par seconde de toute facon.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const current = session.current;
+      if (!current) return;
+      current.tick(Date.now());
+      setPairGap(current.pairGapMs());
+    }, LOOP_MS);
     return () => clearInterval(timer);
   }, []);
 
@@ -108,7 +190,7 @@ export function App() {
         waitingFor={waitingFor}
         waitingSinceMs={waitingSince}
         nowMs={now}
-        pairGapMs={null}
+        pairGapMs={pairGap}
       />
 
       <PlayerFrame />

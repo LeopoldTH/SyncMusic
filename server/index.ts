@@ -128,14 +128,14 @@ wss.on("connection", (socket) => {
         // Toute reprise passe par un depart commun (R11), sans exception.
         if (message.action === "play" || message.action === "next" || message.action === "previous") {
           const waiting = room.resumeAt(0, now);
-          broadcast(code, { type: "waiting", barrierId: waiting.barrierId, waitingFor: waiting.waitingFor, sinceServerMs: now });
+          broadcast(code, { type: "waiting", barrierId: waiting.barrierId, positionMs: waiting.positionMs, waitingFor: waiting.waitingFor, sinceServerMs: now });
         }
         return;
       }
       case "control_seek": {
         const waiting = room.resumeAt(message.positionMs, now);
         broadcastState(code, room);
-        return broadcast(code, { type: "waiting", barrierId: waiting.barrierId, waitingFor: waiting.waitingFor, sinceServerMs: now });
+        return broadcast(code, { type: "waiting", barrierId: waiting.barrierId, positionMs: waiting.positionMs, waitingFor: waiting.waitingFor, sinceServerMs: now });
       }
       case "ready": {
         const outcome = room.ready(session.participantId, message.barrierId, now);
@@ -148,14 +148,14 @@ wss.on("connection", (socket) => {
           });
         }
         if (outcome.kind === "waiting") {
-          return broadcast(code, { type: "waiting", barrierId: outcome.barrierId, waitingFor: outcome.waitingFor, sinceServerMs: now });
+          return broadcast(code, { type: "waiting", barrierId: outcome.barrierId, positionMs: outcome.positionMs, waitingFor: outcome.waitingFor, sinceServerMs: now });
         }
         return;
       }
       case "retract_ready": {
         const outcome = room.retract(session.participantId, message.barrierId, now);
         if (outcome.kind === "waiting") {
-          return broadcast(code, { type: "waiting", barrierId: outcome.barrierId, waitingFor: outcome.waitingFor, sinceServerMs: now });
+          return broadcast(code, { type: "waiting", barrierId: outcome.barrierId, positionMs: outcome.positionMs, waitingFor: outcome.waitingFor, sinceServerMs: now });
         }
         return;
       }
@@ -163,7 +163,7 @@ wss.on("connection", (socket) => {
         const outcome = room.stall(session.participantId, message.positionMs, now);
         if (outcome.kind === "waiting") {
           broadcastState(code, room);
-          return broadcast(code, { type: "waiting", barrierId: outcome.barrierId, waitingFor: outcome.waitingFor, sinceServerMs: now });
+          return broadcast(code, { type: "waiting", barrierId: outcome.barrierId, positionMs: outcome.positionMs, waitingFor: outcome.waitingFor, sinceServerMs: now });
         }
         return;
       }

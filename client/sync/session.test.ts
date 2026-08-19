@@ -1,0 +1,160 @@
+import { describe, it, expect } from "vitest";
+import { createSession } from "./session";
+import { createClockEstimator } from "./clock";
+import { createDriftLog } from "./driftLog";
+import { SYNC_THRESHOLDS } from "./thresholds";
+import type { ClientMessage } from "../../shared/protocol";
+import type { PlayerObservation, PlayerPort } from "../player/playerPort";
+
+function fakePlayer(observation: PlayerObservation) {
+  const calls: string[] = [];
+  let rateReset = false;
+  const port: PlayerPort & { calls: string[]; set(o: Partial<PlayerObservation>): void; queueRateReset(): void } = {
+    calls,
+    set(o) { Object.assign(observation, o); },
+    queueRateReset() { rateReset = true; },
+    observe: () => observation,
+    seekTo: (ms) => { calls.push("seek:" + Math.round(ms)); },
+    setRate: (r) => { calls.push("rate:" + r); },
+    play: () => { calls.push("play"); return null; },
+    pause: () => { calls.push("pause"); },
+    load: (v) => { calls.push("load:" + v); },
+    takeRateReset: () => { const p = rateReset; rateReset = false; return p; },
+    takeFault: () => null,
+  };
+  return port;
+}
+
+/** Une session deja synchronisee, horloge convergee, depart commun recu. */
+function syncedSession(observation: PlayerObservation) {
+  const player = fakePlayer(observation);
+  const sent: ClientMessage[] = [];
+  const clock = createClockEstimator();
+  const session = createSession({
+    player, clock, log: createDriftLog(), thresholds: SYNC_THRESHOLDS,
+    send: (m) => sent.push(m),
+  });
+
+  session.onServerMessage({ type: "room_state", code: "ABCD", youAre: "leo", participants: ["leo", "pote"], queue: [], currentItemId: null, playing: true }, 0);
+  for (let i = 0; i < 6; i++) {
+    session.onServerMessage({ type: "clock_probe_reply", clientSentAt: i * 10, serverReceivedAt: i * 10 + 20, serverSentAt: i * 10 + 21 }, i * 10 + 40);
+  }
+  session.onServerMessage({ type: "common_start", barrierId: 1, positionMs: 0, startAtServerMs: 20 }, 0);
+  player.calls.length = 0;
+  sent.length = 0;
+  return { session, player, sent };
+}
+
+describe("correction en cours", () => {
+  it("laisse une correction aller a son terme sans en redecider une autre", () => {
+    // Ecart de 2 s: le correcteur demande 1,20x pendant 10 s.
+    const obs: PlayerObservation = { positionMs: 58_000, fresh: true, playing: true };
+    const { session, player } = syncedSession(obs);
+
+    session.tick(60_000);
+    const rateCalls = player.calls.filter((c) => c.startsWith("rate:"));
+    expect(rateCalls).toEqual(["rate:1.2"]);
+    expect(session.correcting()).toBe(true);
+
+    // Neuf tours plus tard, toujours la meme correction: aucune nouvelle decision.
+    for (let t = 61_000; t < 70_000; t += 1_000) session.tick(t);
+    expect(player.calls.filter((c) => c.startsWith("rate:"))).toEqual(["rate:1.2"]);
+    expect(session.correcting()).toBe(true);
+  });
+
+  it("remet la vitesse a 1 au terme de la correction", () => {
+    const obs: PlayerObservation = { positionMs: 58_000, fresh: true, playing: true };
+    const { session, player } = syncedSession(obs);
+    session.tick(60_000);
+    session.tick(71_000);
+    expect(player.calls.filter((c) => c.startsWith("rate:"))).toEqual(["rate:1.2", "rate:1"]);
+    expect(session.correcting()).toBe(false);
+  });
+
+  it("annule la correction quand un changement de morceau remet la vitesse a 1", () => {
+    const obs: PlayerObservation = { positionMs: 58_000, fresh: true, playing: true };
+    const { session, player } = syncedSession(obs);
+    const rates = () => player.calls.filter((c) => c.startsWith("rate:"));
+
+    session.tick(60_000);
+    expect(rates()).toHaveLength(1);
+
+    // Sans remise a zero, le tour suivant ne redecide rien: la correction court encore.
+    obs.positionMs += 1_000;
+    session.tick(61_000);
+    expect(rates()).toHaveLength(1);
+
+    // Le changement de morceau a annule la vitesse cote lecteur: la session doit en
+    // reemettre une, au lieu de croire l ancienne toujours en cours.
+    obs.positionMs += 1_000;
+    player.queueRateReset();
+    session.tick(62_000);
+    expect(rates()).toHaveLength(2);
+  });
+});
+
+describe("observation non fraiche", () => {
+  it("ne decide rien sur une position gelee", () => {
+    const obs: PlayerObservation = { positionMs: 58_000, fresh: false, playing: true };
+    const { session, player } = syncedSession(obs);
+    session.tick(60_000);
+    expect(player.calls.filter((c) => c.startsWith("rate:") || c.startsWith("seek:"))).toHaveLength(0);
+  });
+
+  it("annonce une stagnation quand la position gele en lecture", () => {
+    const obs: PlayerObservation = { positionMs: 58_000, fresh: false, playing: true };
+    const { session, sent } = syncedSession(obs);
+    session.tick(60_000);
+    expect(sent.some((m) => m.type === "stall")).toBe(true);
+  });
+
+  it("ne repete pas l annonce de stagnation a chaque tour", () => {
+    const obs: PlayerObservation = { positionMs: 58_000, fresh: false, playing: true };
+    const { session, sent } = syncedSession(obs);
+    session.tick(60_000);
+    session.tick(61_000);
+    expect(sent.filter((m) => m.type === "stall")).toHaveLength(1);
+  });
+});
+
+describe("mise en attente", () => {
+  it("se place a la position annoncee et se met en pause", () => {
+    const obs: PlayerObservation = { positionMs: 58_000, fresh: true, playing: true };
+    const { session, player } = syncedSession(obs);
+    session.onServerMessage({ type: "waiting", barrierId: 2, positionMs: 90_000, waitingFor: ["pote"], sinceServerMs: 0 }, 60_000);
+    expect(player.calls).toContain("pause");
+    expect(player.calls).toContain("seek:90000");
+  });
+
+  it("ne se declare pret qu une fois l horloge convergee", () => {
+    const player = fakePlayer({ positionMs: 90_000, fresh: true, playing: false });
+    const sent: ClientMessage[] = [];
+    const session = createSession({
+      player, clock: createClockEstimator(), log: createDriftLog(),
+      thresholds: SYNC_THRESHOLDS, send: (m) => sent.push(m),
+    });
+    session.onServerMessage({ type: "waiting", barrierId: 2, positionMs: 90_000, waitingFor: ["leo"], sinceServerMs: 0 }, 0);
+    session.tick(1_000);
+    // Aucune sonde n a encore ete acceptee: l estimation n est pas convergee.
+    expect(sent.some((m) => m.type === "ready")).toBe(false);
+  });
+
+  it("se declare pret une fois l horloge convergee", () => {
+    const obs: PlayerObservation = { positionMs: 90_000, fresh: true, playing: false };
+    const { session, sent } = syncedSession(obs);
+    session.onServerMessage({ type: "waiting", barrierId: 2, positionMs: 90_000, waitingFor: ["leo"], sinceServerMs: 0 }, 60_000);
+    session.tick(61_000);
+    expect(sent.some((m) => m.type === "ready" && m.barrierId === 2)).toBe(true);
+  });
+});
+
+describe("rapport de position", () => {
+  it("rapporte sa position a chaque tour, fraicheur comprise", () => {
+    const obs: PlayerObservation = { positionMs: 58_000, fresh: false, playing: true };
+    const { session, sent } = syncedSession(obs);
+    session.tick(60_000);
+    const report = sent.find((m) => m.type === "position_report");
+    expect(report).toBeDefined();
+    if (report?.type === "position_report") expect(report.fresh).toBe(false);
+  });
+});

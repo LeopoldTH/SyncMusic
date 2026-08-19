@@ -135,9 +135,15 @@ export const CommonStart = z.object({
   startAtServerMs: Millis,
 }).strict();
 
+/*
+ * L attente porte la position: sans elle, un client mis en attente ne sait pas ou se
+ * placer avant de se declarer pret, et le depart commun repartirait de positions
+ * differentes. Trou revele a l assemblage, pas a la conception.
+ */
 export const Waiting = z.object({
   type: z.literal("waiting"),
   barrierId: z.number().int().nonnegative(),
+  positionMs: Millis.nonnegative(),
   waitingFor: z.array(z.string().min(1)),
   sinceServerMs: Millis,
 }).strict();
