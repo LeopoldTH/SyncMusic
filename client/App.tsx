@@ -44,6 +44,8 @@ export function App() {
   const port = useRef<ReturnType<typeof createYouTubePlayer> | null>(null);
   const playerCreated = useRef(false);
   const [playerReady, setPlayerReady] = useState(false);
+  /* Tout clic dans l application vaut geste utilisateur pour les conditions d utilisation. */
+  const gestured = useRef(false);
   const loadedVideo = useRef<string | null>(null);
 
   const handle = useCallback((message: ServerMessage) => {
@@ -132,6 +134,7 @@ export function App() {
                 const shown = Math.max(0, Math.min(box.bottom, window.innerHeight) - Math.max(box.top, 0));
                 return box.height === 0 ? 0 : shown / box.height;
               },
+              hasUserGesture: () => gestured.current,
             });
             port.current = port_;
             session.current = createSession({
@@ -185,7 +188,13 @@ export function App() {
     return () => clearInterval(timer);
   }, []);
 
-  const send = transport.current?.send.bind(transport.current);
+  const rawSend = transport.current?.send.bind(transport.current);
+  const send = rawSend
+    ? (message: Parameters<NonNullable<typeof rawSend>>[0]) => {
+        gestured.current = true;
+        rawSend(message);
+      }
+    : undefined;
 
   if (room === null) {
     return (

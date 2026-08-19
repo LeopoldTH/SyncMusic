@@ -26,6 +26,12 @@ export interface AdapterOptions {
   raw: RawPlayer;
   /** Fraction visible du lecteur a l ecran, entre 0 et 1. */
   visibleFraction: () => number;
+  /**
+   * Vrai des que l utilisateur a interagi avec la page (rejoindre une room, cliquer
+   * un controle). Les conditions d utilisation visent une lecture qui demarre sans
+   * que personne n ait rien fait, pas une lecture demandee par quelqu un.
+   */
+  hasUserGesture: () => boolean;
   /** Delai au-dela duquel une position qui n avance plus est declaree gelee. */
   staleAfterMs?: number;
 }
@@ -33,7 +39,7 @@ export interface AdapterOptions {
 const PLAYING = 1;
 
 export function createYouTubePlayer(options: AdapterOptions): PlayerPort {
-  const { raw, visibleFraction } = options;
+  const { raw, visibleFraction, hasUserGesture } = options;
   const staleAfterMs = options.staleAfterMs ?? 1_200;
 
   let lastPositionMs: number | null = null;
@@ -86,13 +92,14 @@ export function createYouTubePlayer(options: AdapterOptions): PlayerPort {
 
     play(opts: { automatic: boolean }, nowMs: number): PlayerFault | null {
       /*
-       * La porte de visibilite ne s applique qu au tout premier demarrage de session,
-       * le seul qui soit une lecture automatique au sens des conditions d utilisation.
-       * Une reprise pilotee ensuite fonctionne onglet cache: mesure du 2026-08-19,
-       * etat 0 -> 1. Sans cette restriction, un onglet en arriere-plan resterait
-       * indefiniment non pret et aucune barriere ne se fermerait jamais.
+       * La porte ne se ferme que sur une lecture reellement automatique: premiere de
+       * la session, sans aucun geste de l utilisateur, et lecteur peu visible.
+       *
+       * Sans la condition de geste, le cas d usage central du produit ne marche pas:
+       * ton pote appuie sur Lecture pendant que ton onglet est derriere le jeu, et
+       * ta premiere lecture est refusee alors que tu as toi-meme rejoint la room.
        */
-      if (opts.automatic && !hasStartedOnce && visibleFraction() <= 0.5) {
+      if (opts.automatic && !hasStartedOnce && !hasUserGesture() && visibleFraction() <= 0.5) {
         return { kind: "not_visible" };
       }
       hasStartedOnce = true;

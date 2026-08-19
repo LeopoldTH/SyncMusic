@@ -21,11 +21,13 @@ function fakeRaw(initial = { seconds: 0, state: 1 }) {
 
 const visible = () => 1;
 const hidden = () => 0;
+const noGesture = () => false;
+const gestured = () => true;
 
 describe("fraicheur de la position", () => {
   it("declare la position gelee quand elle n avance plus en lecture", () => {
     const raw = fakeRaw({ seconds: 30, state: 1 });
-    const p = createYouTubePlayer({ raw, visibleFraction: visible });
+    const p = createYouTubePlayer({ raw, visibleFraction: visible, hasUserGesture: noGesture });
 
     expect(p.observe(0).fresh).toBe(true);
     raw.seconds = 31;
@@ -36,14 +38,14 @@ describe("fraicheur de la position", () => {
 
   it("ne declare pas gelee une position a l arret volontaire", () => {
     const raw = fakeRaw({ seconds: 30, state: 2 });
-    const p = createYouTubePlayer({ raw, visibleFraction: visible });
+    const p = createYouTubePlayer({ raw, visibleFraction: visible, hasUserGesture: noGesture });
     p.observe(0);
     expect(p.observe(5_000).fresh).toBe(true);
   });
 
   it("marque comme non observee une position lue juste apres un positionnement", () => {
     const raw = fakeRaw({ seconds: 30, state: 1 });
-    const p = createYouTubePlayer({ raw, visibleFraction: visible });
+    const p = createYouTubePlayer({ raw, visibleFraction: visible, hasUserGesture: noGesture });
     p.observe(0);
     p.seekTo(90_000, 1_000);
     expect(p.observe(1_100).fresh).toBe(false);
@@ -55,7 +57,7 @@ describe("fraicheur de la position", () => {
 describe("chargement d un morceau", () => {
   it("signale la remise a 1 de la vitesse, une seule fois", () => {
     const raw = fakeRaw();
-    const p = createYouTubePlayer({ raw, visibleFraction: visible });
+    const p = createYouTubePlayer({ raw, visibleFraction: visible, hasUserGesture: noGesture });
     p.load("kJQP7kiw5Fk", 0);
     expect(p.takeRateReset()).toBe(true);
     expect(p.takeRateReset()).toBe(false);
@@ -65,14 +67,14 @@ describe("chargement d un morceau", () => {
 describe("porte de visibilite", () => {
   it("refuse une lecture automatique quand le lecteur n est pas assez visible", () => {
     const raw = fakeRaw({ seconds: 0, state: 2 });
-    const p = createYouTubePlayer({ raw, visibleFraction: hidden });
+    const p = createYouTubePlayer({ raw, visibleFraction: hidden, hasUserGesture: noGesture });
     expect(p.play({ automatic: true }, 0)).toEqual({ kind: "not_visible" });
     expect(raw.calls).not.toContain("play");
   });
 
   it("autorise une lecture demandee par un geste utilisateur meme peu visible", () => {
     const raw = fakeRaw({ seconds: 0, state: 2 });
-    const p = createYouTubePlayer({ raw, visibleFraction: hidden });
+    const p = createYouTubePlayer({ raw, visibleFraction: hidden, hasUserGesture: noGesture });
     expect(p.play({ automatic: false }, 0)).toBe(null);
     expect(raw.calls).toContain("play");
   });
@@ -83,7 +85,7 @@ describe("porte de visibilite", () => {
     // barriere ne se fermerait: le produit ne marcherait pas dans son seul cas d usage.
     const raw = fakeRaw({ seconds: 0, state: 2 });
     let fraction = 1;
-    const p = createYouTubePlayer({ raw, visibleFraction: () => fraction });
+    const p = createYouTubePlayer({ raw, visibleFraction: () => fraction, hasUserGesture: noGesture });
 
     expect(p.play({ automatic: true }, 0)).toBe(null);
 
@@ -92,9 +94,18 @@ describe("porte de visibilite", () => {
     expect(raw.calls.filter((c) => c === "play")).toHaveLength(2);
   });
 
+  it("autorise une premiere lecture peu visible quand l utilisateur a agi", () => {
+    // Cas central du produit: ton pote appuie sur Lecture, ton onglet est derriere le
+    // jeu, et tu as toi-meme rejoint la room au clavier quelques minutes plus tot.
+    const raw = fakeRaw({ seconds: 0, state: 2 });
+    const p = createYouTubePlayer({ raw, visibleFraction: hidden, hasUserGesture: gestured });
+    expect(p.play({ automatic: true }, 0)).toBe(null);
+    expect(raw.calls).toContain("play");
+  });
+
   it("refuse tant que la session n a jamais demarre, meme au deuxieme essai", () => {
     const raw = fakeRaw({ seconds: 0, state: 2 });
-    const p = createYouTubePlayer({ raw, visibleFraction: hidden });
+    const p = createYouTubePlayer({ raw, visibleFraction: hidden, hasUserGesture: noGesture });
     expect(p.play({ automatic: true }, 0)).toEqual({ kind: "not_visible" });
     expect(p.play({ automatic: true }, 1_000)).toEqual({ kind: "not_visible" });
     expect(raw.calls).not.toContain("play");
@@ -109,7 +120,7 @@ describe("pannes", () => {
 
   it("signale un refus de lecture quand l ordre n aboutit pas", () => {
     const raw = fakeRaw({ seconds: 0, state: 2 });
-    const p = createYouTubePlayer({ raw, visibleFraction: visible });
+    const p = createYouTubePlayer({ raw, visibleFraction: visible, hasUserGesture: noGesture });
     p.play({ automatic: false }, 0);
     p.observe(100);                 // pas encore en lecture, on laisse sa chance
     expect(p.takeFault()).toBe(null);
@@ -119,7 +130,7 @@ describe("pannes", () => {
 
   it("ne signale rien quand la lecture demarre normalement", () => {
     const raw = fakeRaw({ seconds: 0, state: 2 });
-    const p = createYouTubePlayer({ raw, visibleFraction: visible });
+    const p = createYouTubePlayer({ raw, visibleFraction: visible, hasUserGesture: noGesture });
     p.play({ automatic: false }, 0);
     raw.state = 1;
     p.observe(2_000);
