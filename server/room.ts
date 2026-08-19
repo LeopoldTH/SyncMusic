@@ -49,6 +49,18 @@ export function createRoom(code: string, config: RoomConfig) {
   let currentIndex: number | null = null;
   let playing = false;
   let nextItemId = 1;
+  /*
+   * Timeline autoritaire. Sans elle le serveur ignore ou en est la lecture, et ne peut
+   * pas positionner un arrivant: la timeline ne vivrait que chez les clients deja la.
+   */
+  let timeline: { positionMs: number; startAtServerMs: number } | null = null;
+
+  function noteStart(outcome: BarrierOutcome): BarrierOutcome {
+    if (outcome.kind === "start") {
+      timeline = { positionMs: outcome.positionMs, startAtServerMs: outcome.startAtServerMs };
+    }
+    return outcome;
+  }
 
   /** Un participant deconnecte depuis plus que le delai de grace ne compte plus. */
   function expired(p: Presence, nowMs: number): boolean {
@@ -192,7 +204,14 @@ export function createRoom(code: string, config: RoomConfig) {
     },
 
     ready(participantId: string, barrierId: number, nowMs: number): BarrierOutcome {
-      return barrier.ready({ barrierId, participantId }, nowMs);
+      return noteStart(barrier.ready({ barrierId, participantId }, nowMs));
+    },
+
+    /** Ou en est la lecture maintenant, du point de vue du serveur. */
+    positionNow(nowMs: number): number {
+      if (timeline === null) return 0;
+      if (!playing) return timeline.positionMs;
+      return timeline.positionMs + Math.max(0, nowMs - timeline.startAtServerMs);
     },
 
     retract(participantId: string, barrierId: number, nowMs: number): BarrierOutcome {
@@ -201,12 +220,18 @@ export function createRoom(code: string, config: RoomConfig) {
 
     tick(nowMs: number): BarrierOutcome {
       purge(nowMs);
-      return barrier.tick(nowMs);
+      return noteStart(barrier.tick(nowMs));
     },
 
     resumeAt(positionMs: number, nowMs: number): Waiting {
       playing = true;
       return barrier.open({ positionMs, atServerMs: nowMs });
+    },
+
+    /** Un arrivant en cours de lecture doit passer par un depart commun (F1). */
+    rejoinBarrier(nowMs: number): Waiting | null {
+      if (!playing) return null;
+      return barrier.open({ positionMs: this.positionNow(nowMs), atServerMs: nowMs });
     },
   };
 }

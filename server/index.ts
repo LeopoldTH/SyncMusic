@@ -104,7 +104,19 @@ wss.on("connection", (socket) => {
       const joined = room.join(session.participantId, now);
       if (!joined.ok) return fail(socket, joined.code, joined.message);
       session.code = message.code;
-      return broadcastState(message.code, room);
+      broadcastState(message.code, room);
+      /*
+       * Rejoindre une room en cours de lecture ouvre un depart commun (F1): sans lui,
+       * l arrivant ne sait pas ou se placer et demarre au debut du morceau.
+       */
+      const rejoin = room.rejoinBarrier(now);
+      if (rejoin) {
+        broadcast(message.code, {
+          type: "waiting", barrierId: rejoin.barrierId, positionMs: rejoin.positionMs,
+          waitingFor: rejoin.waitingFor, sinceServerMs: now,
+        });
+      }
+      return;
     }
 
     const code = session.code;

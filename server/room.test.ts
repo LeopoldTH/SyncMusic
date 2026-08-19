@@ -131,3 +131,45 @@ describe("horloge et positions", () => {
     expect(out.kind).toBe("waiting");
   });
 });
+
+describe("arrivee en cours de lecture (F1)", () => {
+  function playingRoom() {
+    const room = createRoom("ABCD", CFG);
+    room.join("leo", T0);
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    room.control("play", T0);
+    const opened = room.resumeAt(0, T0);
+    room.ready("leo", opened.barrierId, T0 + 100);
+    return room;
+  }
+
+  it("connait la position courante une fois le depart commun emis", () => {
+    const room = playingRoom();
+    // Le depart a ete place a T0 + 100 + leadMs, la lecture a donc 5 s d avance
+    // 5 s plus tard, moins la marge.
+    const position = room.positionNow(T0 + 100 + CFG.leadMs + 5_000);
+    expect(position).toBeCloseTo(5_000, -2);
+  });
+
+  it("ouvre une barriere quand un participant arrive pendant la lecture", () => {
+    const room = playingRoom();
+    room.join("pote", T0 + 10_000);
+    const rejoin = room.rejoinBarrier(T0 + 10_000);
+    expect(rejoin).not.toBe(null);
+    expect(rejoin?.waitingFor).toContain("pote");
+    expect(rejoin?.positionMs).toBeGreaterThan(9_000);
+  });
+
+  it("n ouvre aucune barriere quand rien ne joue", () => {
+    const room = createRoom("ABCD", CFG);
+    room.join("leo", T0);
+    expect(room.rejoinBarrier(T0)).toBe(null);
+  });
+
+  it("fige la position rapportee pendant une pause", () => {
+    const room = playingRoom();
+    const before = room.positionNow(T0 + 10_000);
+    room.control("pause", T0 + 10_000);
+    expect(room.positionNow(T0 + 60_000)).toBeLessThanOrEqual(before);
+  });
+});
