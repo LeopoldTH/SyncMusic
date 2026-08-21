@@ -1,0 +1,23 @@
+# fly.toml app configuration file generated for syncmusic-leopold on 2026-08-21T22:28:41+02:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'syncmusic-leopold'
+primary_region = 'cdg'
+
+[build]
+[env]
+  ALLOWED_ORIGIN = 'https://syncmusic-leopold.fly.dev'
+  PORT = '8787'
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '256mb'
