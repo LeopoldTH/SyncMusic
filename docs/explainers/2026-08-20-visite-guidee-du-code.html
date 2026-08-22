@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SyncMusic, visite guidée du code</title>
+<style>
+  :root {
+    --bg: #faf9f6;
+    --ink: #1f2430;
+    --muted: #5c6370;
+    --accent: #b5432a;
+    --client: #2a6db5;
+    --shared: #7a5cb0;
+    --server: #2a8a5c;
+    --card: #ffffff;
+    --line: #e3e0d8;
+    --code-bg: #23272e;
+    --code-ink: #d8dee9;
+    --code-comment: #7d8799;
+    --code-kw: #7fb4e8;
+    --code-str: #a3c98a;
+    --code-num: #e0a86c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  main { max-width: 62rem; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+  h1 { font-size: 2rem; margin: 0 0 0.5rem; letter-spacing: -0.02em; }
+  h2 {
+    font-size: 1.45rem; margin: 3rem 0 0.75rem;
+    padding-top: 1.5rem; border-top: 2px solid var(--line);
+    letter-spacing: -0.01em;
+  }
+  h3 { font-size: 1.1rem; margin: 2rem 0 0.5rem; }
+  p, ul, ol, dl { max-width: 70ch; }
+  a { color: var(--accent); }
+  .meta {
+    display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 1rem;
+    margin: 1rem 0 0; padding: 0.75rem 1rem;
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    font-size: 0.85rem; max-width: 46rem;
+  }
+  .meta dt { font-weight: 600; color: var(--muted); }
+  .meta dd { margin: 0; }
+  .lede { font-size: 1.1rem; color: var(--muted); max-width: 70ch; }
+  figure { margin: 1.5rem 0; }
+  figure svg { max-width: 100%; height: auto; display: block; }
+  figcaption { font-size: 0.85rem; color: var(--muted); margin-top: 0.5rem; max-width: 70ch; }
+  .filecard {
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    padding: 0.9rem 1.1rem; margin: 0.8rem 0; max-width: 70ch;
+  }
+  .filecard h4 { margin: 0 0 0.3rem; font-size: 0.95rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .filecard p { margin: 0.3rem 0; font-size: 0.92rem; }
+  .tag {
+    display: inline-block; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em;
+    text-transform: uppercase; padding: 0.1rem 0.5rem; border-radius: 999px; margin-left: 0.5rem;
+    vertical-align: middle;
+  }
+  .tag-client { background: #e3edf8; color: var(--client); }
+  .tag-shared { background: #ece5f6; color: var(--shared); }
+  .tag-server { background: #e0f0e8; color: var(--server); }
+  .tag-hors { background: #f3efe6; color: #8a7a4a; }
+  pre {
+    background: var(--code-bg); color: var(--code-ink);
+    padding: 1rem 1.2rem; border-radius: 8px; overflow-x: auto;
+    font-size: 0.82rem; line-height: 1.55;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.88em; background: #efece4; padding: 0.05em 0.35em; border-radius: 4px;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .c { color: var(--code-comment); font-style: italic; }
+  .k { color: var(--code-kw); }
+  .s { color: var(--code-str); }
+  .n { color: var(--code-num); }
+  .callout {
+    border-left: 4px solid var(--accent); background: var(--card);
+    padding: 0.8rem 1.1rem; margin: 1.2rem 0; border-radius: 0 8px 8px 0;
+    max-width: 70ch; font-size: 0.95rem;
+  }
+  .callout strong:first-child { color: var(--accent); }
+  ol.steps { counter-reset: step; list-style: none; padding-left: 0; }
+  ol.steps > li {
+    counter-increment: step; position: relative; padding-left: 2.6rem; margin: 0.9rem 0;
+  }
+  ol.steps > li::before {
+    content: counter(step); position: absolute; left: 0; top: 0.1rem;
+    width: 1.8rem; height: 1.8rem; border-radius: 50%;
+    background: var(--ink); color: var(--bg); font-weight: 700; font-size: 0.85rem;
+    display: flex; align-items: center; justify-content: center;
+  }
+  table { border-collapse: collapse; font-size: 0.9rem; margin: 1rem 0; }
+  th, td { border: 1px solid var(--line); padding: 0.4rem 0.8rem; text-align: left; }
+  th { background: var(--card); }
+  footer {
+    margin-top: 4rem; padding-top: 1rem; border-top: 2px solid var(--line);
+    font-size: 0.8rem; color: var(--muted);
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>SyncMusic, visite guidée du code</h1>
+<p class="lede">Le but de chaque dossier, ce que chaque fichier fait concrètement,
+et comment la synchronisation fonctionne vraiment.</p>
+
+<dl class="meta">
+  <dt>Date</dt><dd>2026-08-20</dd>
+  <dt>Input shape</dt><dd>concept</dd>
+  <dt>Subject</dt><dd>La codebase SyncMusic : architecture, rôle de chaque fichier, moteur de synchronisation</dd>
+</dl>
+
+<h2>Le problème que le projet résout</h2>
+
+<p>Deux personnes, chacune chez elle, veulent écouter la même musique <em>en même
+temps</em>. Pas « à peu près en même temps » : si vous êtes au téléphone ensemble,
+un décalage d'une demi-seconde s'entend comme un écho désagréable.</p>
+
+<p>Ça a l'air simple (« il suffit d'appuyer sur play en même temps ») mais trois
+ennemis rendent la chose difficile, et <strong>toute l'architecture du projet découle de
+ces trois ennemis</strong> :</p>
+
+<ol class="steps">
+  <li><strong>Les horloges ne sont pas d'accord.</strong> L'ordinateur de ton ami et le
+  tien n'affichent pas exactement la même heure. Un rendez-vous « à 14:00:00.000 »
+  ne veut rien dire si vos montres divergent de 200&nbsp;ms.</li>
+  <li><strong>Le réseau met un temps variable.</strong> Un message « joue maintenant ! »
+  arrive chez toi en 20&nbsp;ms et chez lui en 180&nbsp;ms. Si chacun obéit à la
+  réception, vous êtes déjà désynchronisés.</li>
+  <li><strong>Le lecteur YouTube ment et fait ce qu'il veut.</strong> La position qu'il
+  rapporte est un cache approximatif, il refuse parfois de démarrer, il se fige sur
+  une pub, il remet la vitesse à 1 sans prévenir. Ces comportements ont été
+  <em>mesurés</em> (voir <code>docs/mesures-api-youtube.md</code>) plutôt que supposés.</li>
+</ol>
+
+<p>La réponse du projet tient en une phrase : <strong>le serveur détient la vérité
+(quoi jouer, à quelle position, depuis quel instant), et chaque client mesure en
+continu son écart à cette vérité et le corrige en douceur.</strong> Tout le reste est
+de la mécanique au service de cette phrase.</p>
+
+<h2>La carte du projet</h2>
+
+<p>Le code vit en trois zones : <strong style="color:var(--client)">client</strong> (ce qui
+tourne dans le navigateur), <strong style="color:var(--server)">server</strong> (le programme
+Node qui héberge les rooms), et <strong style="color:var(--shared)">shared</strong> (le code
+que les deux importent, pour qu'ils ne puissent pas diverger).</p>
+
+<figure>
+<svg viewBox="0 0 920 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Architecture du projet">
+  <style>
+    .box { fill: #ffffff; stroke-width: 2; rx: 8; }
+    .lbl { font: 600 14px -apple-system, "Segoe UI", sans-serif; fill: #1f2430; }
+    .sub { font: 12px -apple-system, "Segoe UI", sans-serif; fill: #5c6370; }
+    .zone { font: 700 15px -apple-system, "Segoe UI", sans-serif; }
+    .arr { stroke: #8a8f99; stroke-width: 2; fill: none; }
+    .arrlbl { font: italic 12px -apple-system, "Segoe UI", sans-serif; fill: #5c6370; }
+  </style>
+  <defs>
+    <marker id="ah" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#8a8f99"/>
+    </marker>
+  </defs>
+
+  <!-- zones -->
+  <rect x="15" y="40" width="330" height="505" fill="#eef4fb" stroke="#2a6db5" stroke-dasharray="6 4" rx="12"/>
+  <text x="30" y="68" class="zone" fill="#2a6db5">client/ (navigateur)</text>
+
+  <rect x="375" y="150" width="190" height="230" fill="#f2edf9" stroke="#7a5cb0" stroke-dasharray="6 4" rx="12"/>
+  <text x="390" y="178" class="zone" fill="#7a5cb0">shared/</text>
+
+  <rect x="595" y="40" width="310" height="400" fill="#e9f5ef" stroke="#2a8a5c" stroke-dasharray="6 4" rx="12"/>
+  <text x="610" y="68" class="zone" fill="#2a8a5c">server/ (Node)</text>
+
+  <!-- client boxes -->
+  <rect x="35" y="90" width="290" height="52" class="box" stroke="#2a6db5"/>
+  <text x="50" y="112" class="lbl">App.tsx + components/</text>
+  <text x="50" y="130" class="sub">l'interface : affiche l'état, capte les clics</text>
+
+  <rect x="35" y="170" width="290" height="70" class="box" stroke="#2a6db5"/>
+  <text x="50" y="192" class="lbl">sync/session.ts — le chef d'orchestre</text>
+  <text x="50" y="210" class="sub">boucle chaque seconde : observe, mesure,</text>
+  <text x="50" y="226" class="sub">décide, corrige</text>
+
+  <rect x="35" y="268" width="138" height="88" class="box" stroke="#2a6db5"/>
+  <text x="48" y="290" class="lbl">sync/ (moteur)</text>
+  <text x="48" y="308" class="sub">clock, timeline,</text>
+  <text x="48" y="324" class="sub">corrector, stall,</text>
+  <text x="48" y="340" class="sub">thresholds, driftLog</text>
+
+  <rect x="189" y="268" width="136" height="88" class="box" stroke="#2a6db5"/>
+  <text x="202" y="290" class="lbl">player/</text>
+  <text x="202" y="308" class="sub">playerPort = contrat</text>
+  <text x="202" y="324" class="sub">youtubePlayer =</text>
+  <text x="202" y="340" class="sub">les pièges YouTube</text>
+
+  <rect x="35" y="390" width="290" height="52" class="box" stroke="#2a6db5"/>
+  <text x="50" y="412" class="lbl">transport/socket.ts</text>
+  <text x="50" y="430" class="sub">la prise WebSocket, valide et transmet</text>
+
+  <rect x="35" y="470" width="290" height="52" class="box" stroke="#2a6db5"/>
+  <text x="50" y="492" class="lbl">lib/ (videoId, serverUrl)</text>
+  <text x="50" y="510" class="sub">petits utilitaires purs</text>
+
+  <!-- shared boxes -->
+  <rect x="393" y="200" width="154" height="70" class="box" stroke="#7a5cb0"/>
+  <text x="406" y="222" class="lbl">protocol.ts</text>
+  <text x="406" y="240" class="sub">tous les messages,</text>
+  <text x="406" y="256" class="sub">validés par Zod</text>
+
+  <rect x="393" y="290" width="154" height="70" class="box" stroke="#7a5cb0"/>
+  <text x="406" y="312" class="lbl">sync/barrier.ts</text>
+  <text x="406" y="330" class="sub">le départ commun</text>
+  <text x="406" y="346" class="sub">(machine à états)</text>
+
+  <!-- server boxes -->
+  <rect x="615" y="90" width="270" height="70" class="box" stroke="#2a8a5c"/>
+  <text x="630" y="112" class="lbl">index.ts — le transport</text>
+  <text x="630" y="130" class="sub">traduit les messages WebSocket en appels,</text>
+  <text x="630" y="146" class="sub">rediffuse l'état. Aucune logique.</text>
+
+  <rect x="615" y="190" width="270" height="70" class="box" stroke="#2a8a5c"/>
+  <text x="630" y="212" class="lbl">room.ts — la vérité</text>
+  <text x="630" y="230" class="sub">file, participants, timeline autoritaire.</text>
+  <text x="630" y="246" class="sub">Zéro socket : testable sans réseau.</text>
+
+  <rect x="615" y="290" width="128" height="60" class="box" stroke="#2a8a5c"/>
+  <text x="628" y="312" class="lbl">roomRegistry</text>
+  <text x="628" y="330" class="sub">codes, cycle de vie</text>
+
+  <rect x="757" y="290" width="128" height="60" class="box" stroke="#2a8a5c"/>
+  <text x="770" y="312" class="lbl">videoTitle</text>
+  <text x="770" y="330" class="sub">titres via oEmbed</text>
+
+  <rect x="615" y="370" width="270" height="52" class="box" stroke="#2a8a5c"/>
+  <text x="630" y="392" class="lbl">static.ts</text>
+  <text x="630" y="410" class="sub">sert l'appli buildée sur le même port</text>
+
+  <!-- arrows -->
+  <path class="arr" d="M180 142 L180 170" marker-end="url(#ah)"/>
+  <path class="arr" d="M104 240 L104 268" marker-end="url(#ah)"/>
+  <path class="arr" d="M257 240 L257 268" marker-end="url(#ah)"/>
+  <path class="arr" d="M180 240 L180 390" marker-end="url(#ah)"/>
+  <path class="arr" d="M325 496 C 420 496, 470 460, 620 130 " marker-end="url(#ah)" stroke-dasharray="0"/>
+  <path class="arr" d="M325 416 C 380 416, 380 250, 393 240" marker-end="url(#ah)"/>
+  <path class="arr" d="M547 235 C 580 235, 590 225, 615 222" marker-end="url(#ah)"/>
+  <path class="arr" d="M547 325 C 585 325, 595 240, 613 232" marker-end="url(#ah)"/>
+  <text x="360" y="475" class="arrlbl">WebSocket (un seul port)</text>
+  <path class="arr" d="M750 160 L750 190" marker-end="url(#ah)"/>
+  <path class="arr" d="M700 260 L690 290" marker-end="url(#ah)"/>
+  <path class="arr" d="M790 260 L805 290" marker-end="url(#ah)"/>
+</svg>
+<figcaption>Les flèches se lisent « utilise ». Les deux côtés importent
+<code>shared/</code> : le protocole et la barrière sont écrits une seule fois.
+Le client ne parle au serveur que par <code>socket.ts</code>, le serveur ne parle
+au client que par <code>index.ts</code>.</figcaption>
+</figure>
+
+<div class="callout">
+<strong>Le principe à retenir.</strong> Chaque zone a une frontière volontairement
+étanche : le moteur de sync ne connaît pas YouTube (il ne voit que
+<code>playerPort</code>), la logique de room ne connaît pas les WebSockets (elle ne
+voit que des appels de fonction). C'est ce qui rend le cœur du projet testable
+sans navigateur ni réseau, et c'est le premier argument à donner en entretien.
+</div>
+
+<h2>Dossier par dossier, fichier par fichier</h2>
+
+<h3>shared/ — le contrat commun</h3>
+
+<div class="filecard">
+<h4>protocol.ts <span class="tag tag-shared">shared</span></h4>
+<p><strong>Le dictionnaire de tous les messages</strong> qui circulent entre client et
+serveur : « rejoins la room X », « ajoute cette vidéo », « voici ma position »,
+etc. Chaque message a un schéma Zod (une bibliothèque de validation) : un message
+mal formé est rejeté à l'entrée au lieu de produire un bug silencieux plus loin.</p>
+<p>C'est <em>la</em> raison pour laquelle le projet est en TypeScript des deux côtés :
+renommer un champ ici casse la compilation partout, immédiatement.</p>
+</div>
+
+<div class="filecard">
+<h4>sync/barrier.ts <span class="tag tag-shared">shared</span></h4>
+<p><strong>Le mécanisme de départ commun</strong>, détaillé plus bas. C'est une machine à
+états pure : « ouvre une barrière à telle position », « untel est prêt », « tout
+le monde est prêt → on part à tel instant ». Elle vit dans <code>shared/</code>
+parce que le <em>serveur</em> l'exécute, mais elle est écrite sans dépendance pour
+être testable seule.</p>
+</div>
+
+<h3>server/ — l'arbitre</h3>
+
+<div class="filecard">
+<h4>room.ts <span class="tag tag-server">server</span></h4>
+<p><strong>L'état de vérité d'une room</strong> : qui est là, la file d'attente, quel
+morceau joue, et surtout la <em>timeline autoritaire</em> — « la lecture est à la
+position P depuis l'instant T ». C'est grâce à elle qu'un arrivant en cours de
+lecture peut être placé au bon endroit : le serveur sait où en est la musique
+sans demander aux clients.</p>
+<p>Fichier volontairement sans aucun socket : 100&nbsp;% de la logique se teste
+avec de simples appels de fonction (<code>room.test.ts</code>, le plus gros fichier
+de tests du projet).</p>
+</div>
+
+<div class="filecard">
+<h4>index.ts <span class="tag tag-server">server</span></h4>
+<p><strong>Le standard téléphonique.</strong> Il accepte les connexions WebSocket,
+traduit chaque message entrant en appel sur <code>room.ts</code>, et rediffuse
+l'état aux membres de la room. Il tient aussi deux minuteries : rediffusion des
+positions chaque seconde, et balayage des rooms mortes. Aucune décision de
+synchronisation ici — si tu cherches « pourquoi ça fait ça », la réponse est
+presque toujours dans <code>room.ts</code> ou dans le moteur client.</p>
+</div>
+
+<div class="filecard">
+<h4>roomRegistry.ts <span class="tag tag-server">server</span></h4>
+<p><strong>Le portier.</strong> Tire les codes de room (4 lettres, source
+cryptographique), crée et retrouve les rooms, détruit celles où plus personne ne
+peut revenir. Le code de room est le seul contrôle d'accès de l'application :
+pas de compte, pas de mot de passe (ça, c'est le prochain chantier).</p>
+</div>
+
+<div class="filecard">
+<h4>videoTitle.ts <span class="tag tag-server">server</span></h4>
+<p><strong>Va chercher le titre d'une vidéo</strong> via oEmbed, l'endpoint public de
+YouTube : pas de clé d'API, pas de quota. En échange on n'a que le titre et
+l'auteur — exactement ce dont la file a besoin.</p>
+</div>
+
+<div class="filecard">
+<h4>static.ts <span class="tag tag-server">server</span></h4>
+<p><strong>Sert les fichiers du client buildé</strong> (le résultat de
+<code>npm run build</code>) sur le même port que le WebSocket. Écrit à la main en
+~100 lignes plutôt qu'avec une dépendance ; la seule partie délicate est
+d'empêcher un chemin du type <code>../../secrets</code> de sortir du dossier.</p>
+</div>
+
+<h3>client/sync/ — le moteur (le cœur du projet)</h3>
+
+<p>Six fichiers, tous <strong>purs</strong> : aucun ne touche au réseau, au DOM ou à
+YouTube. On leur donne des nombres, ils rendent des décisions. C'est pour ça
+qu'ils sont testés à fond et qu'un simulateur peut les faire tourner sans
+navigateur. Le détail de chacun arrive dans la section suivante ; voici la carte
+d'identité :</p>
+
+<div class="filecard">
+<h4>clock.ts <span class="tag tag-client">client</span></h4>
+<p>Estime l'écart entre l'horloge locale et celle du serveur. Répond à
+« quand le serveur dit 14:00:00, quelle heure est-il sur MA machine ? »</p>
+</div>
+<div class="filecard">
+<h4>timeline.ts <span class="tag tag-client">client</span></h4>
+<p>30 lignes. Convertit « départ commun » + « heure actuelle » en « position où mon
+lecteur devrait être ». La règle de trois du projet.</p>
+</div>
+<div class="filecard">
+<h4>corrector.ts <span class="tag tag-client">client</span></h4>
+<p>Décide quoi faire d'un écart : ignorer, ajuster la vitesse, ou sauter. Fonction
+pure, zéro état.</p>
+</div>
+<div class="filecard">
+<h4>thresholds.ts <span class="tag tag-client">client</span></h4>
+<p>Les seuils (300&nbsp;ms, 3&nbsp;s…) avec, pour chacun, la mesure qui le justifie.
+Aucun nombre magique : chaque valeur renvoie à <code>docs/mesures-api-youtube.md</code>.</p>
+</div>
+<div class="filecard">
+<h4>stallDetector.ts <span class="tag tag-client">client</span></h4>
+<p>Détecte qu'un lecteur est figé (pub, buffering) : position qui n'avance plus sur
+deux relevés consécutifs alors qu'elle devrait.</p>
+</div>
+<div class="filecard">
+<h4>driftLog.ts <span class="tag tag-client">client</span></h4>
+<p>Journal en mémoire de l'écart mesuré à chaque seconde. Alimente la courbe de
+dérive à l'écran et le critère de succès du projet (« l'écart reste sous le seuil
+audible pendant une session entière »).</p>
+</div>
+<div class="filecard">
+<h4>session.ts <span class="tag tag-client">client</span></h4>
+<p><strong>Le chef d'orchestre.</strong> Le seul fichier du moteur qui a des effets :
+il reçoit les messages du serveur, fait tourner la boucle chaque seconde, pousse
+les observations dans les modules purs ci-dessus et traduit leurs décisions en
+appels au lecteur. Si tu ne dois relire qu'un fichier pour comprendre le projet,
+c'est celui-là.</p>
+</div>
+
+<h3>client/player/ — dompter YouTube</h3>
+
+<div class="filecard">
+<h4>playerPort.ts <span class="tag tag-client">client</span></h4>
+<p><strong>Le contrat.</strong> 40 lignes qui disent ce dont le moteur a besoin d'un
+lecteur : observer la position, jouer, se positionner, changer la vitesse. Le
+moteur ne connaît que ce fichier. Demain tu pourrais brancher Spotify ou un
+fichier MP3 local en réécrivant seulement l'implémentation.</p>
+</div>
+
+<div class="filecard">
+<h4>youtubePlayer.ts <span class="tag tag-client">client</span></h4>
+<p><strong>L'implémentation du contrat pour YouTube</strong>, et le fichier qui
+concentre tous les pièges mesurés : la position lue est un cache extrapolé (d'où
+le drapeau <code>fresh</code> : « cette valeur est-elle une vraie mesure ? »), une
+position lue juste après un seek est un écho, la vitesse repasse à 1 à chaque
+changement de vidéo, l'erreur 153 signale un en-tête Referer absent. Chaque
+bizarrerie est confinée ici pour que le moteur reste propre.</p>
+</div>
+
+<div class="filecard">
+<h4>loadYouTubeApi.ts <span class="tag tag-client">client</span></h4>
+<p>Charge le script de l'IFrame Player API, qui a un contrat old-school (il pose un
+global et appelle une fonction globale quand il est prêt). Ce fichier emballe ça
+dans une promesse propre.</p>
+</div>
+
+<h3>client/, le reste — brancher et afficher</h3>
+
+<div class="filecard">
+<h4>transport/socket.ts <span class="tag tag-client">client</span></h4>
+<p>La prise WebSocket côté client. Valide ce qui entre (via
+<code>protocol.ts</code>), transmet ce qui sort. Mince par construction.</p>
+</div>
+<div class="filecard">
+<h4>lib/videoId.ts, lib/serverUrl.ts <span class="tag tag-client">client</span></h4>
+<p>Deux utilitaires purs : extraire un identifiant de vidéo de ce qu'un humain
+colle (lien complet, lien court, identifiant nu), et déduire l'adresse du serveur
+sans jamais coder une adresse en dur.</p>
+</div>
+<div class="filecard">
+<h4>App.tsx + components/ <span class="tag tag-client">client</span></h4>
+<p>Tu as demandé peu de détail sur le front, donc en bref : <code>App.tsx</code>
+assemble tout (crée le transport, le lecteur, la session, fait tourner la boucle)
+et chaque composant affiche une facette de l'état — <code>RoomJoin</code> (entrer),
+<code>RoomCode</code> (partager le code), <code>Queue</code> (la file),
+<code>Transport.tsx</code> (play/pause/next), <code>SyncBadge</code> (l'écart en un
+coup d'œil), <code>DriftChart</code> (la courbe), <code>LatencyCalibration</code>
+(le réglage casque/enceinte). Les composants ne décident rien : ils affichent et
+remontent les clics.</p>
+</div>
+
+<h3>Hors application — les fichiers qui racontent le pourquoi</h3>
+
+<div class="filecard">
+<h4>spike/probe.html + probe.js <span class="tag tag-hors">hors app</span></h4>
+<p><strong>Le banc de mesure.</strong> Une page autonome qui martyrise le lecteur
+YouTube et affiche des chiffres : à quelle cadence la position se met à jour, ce
+qui se passe après un seek, comment la vitesse est quantifiée. Rien de ce code ne
+part dans l'application ; ses <em>chiffres</em>, si — ils deviennent les seuils de
+<code>thresholds.ts</code>. Garde-le : « j'ai mesuré avant de coder » est ton
+meilleur argument d'entretien.</p>
+</div>
+<div class="filecard">
+<h4>tools/simulate.ts <span class="tag tag-hors">hors app</span></h4>
+<p>Fait tourner le moteur complet avec des horloges fausses et un réseau simulé,
+sans navigateur (<code>npm run sim</code>). C'est lui qui a trouvé le bug
+d'oscillation (une correction relancée à chaque tour sans jamais aboutir) que les
+tests unitaires ne voyaient pas.</p>
+</div>
+<div class="filecard">
+<h4>docs/ <span class="tag tag-hors">hors app</span></h4>
+<p><code>mesures-api-youtube.md</code> : les mesures et comment les reproduire.
+<code>ecouter-a-deux.md</code> : le mode d'emploi pour une vraie session à deux.
+<code>a-faire.md</code> : les points remontés en usage réel.
+<code>plans/</code> : le plan d'origine du chantier.</p>
+</div>
+<div class="filecard">
+<h4>La racine <span class="tag tag-hors">config</span></h4>
+<p><code>package.json</code> (dépendances et commandes : <code>dev</code>,
+<code>test</code>, <code>build</code>, <code>sim</code>…),
+<code>tsconfig.json</code> (TypeScript strict), <code>vite.config.ts</code> (le
+bundler du client), <code>vitest.config.ts</code> (le lanceur de tests).</p>
+</div>
+
+<h2>La synchro, pas à pas</h2>
+
+<p>Quatre mécanismes, chacun dans son fichier, qui répondent aux trois ennemis du
+début. Dans l'ordre où ils interviennent.</p>
+
+<h3>1. S'accorder sur l'heure — clock.ts</h3>
+
+<p><strong>Le problème :</strong> le serveur va dire « départ à l'instant serveur
+T ». Pour obéir, chaque client doit savoir convertir T dans sa propre horloge.</p>
+
+<p><strong>La solution :</strong> le même principe que NTP, le protocole qui met les
+ordinateurs à l'heure. Le client envoie une sonde horodatée, le serveur la
+tamponne et la renvoie, le client note l'heure du retour :</p>
+
+<figure>
+<svg viewBox="0 0 720 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Aller-retour d'une sonde d'horloge">
+  <style>
+    .tl { stroke: #1f2430; stroke-width: 2.5; }
+    .lbl2 { font: 600 14px -apple-system, "Segoe UI", sans-serif; fill: #1f2430; }
+    .sub2 { font: 12.5px -apple-system, "Segoe UI", sans-serif; fill: #5c6370; }
+    .probe { stroke: #b5432a; stroke-width: 2; fill: none; }
+    .pt { fill: #b5432a; }
+  </style>
+  <defs>
+    <marker id="ah2" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#b5432a"/>
+    </marker>
+  </defs>
+  <text x="20" y="50" class="lbl2">Client</text>
+  <line x1="90" y1="45" x2="700" y2="45" class="tl"/>
+  <text x="20" y="205" class="lbl2">Serveur</text>
+  <line x1="90" y1="200" x2="700" y2="200" class="tl"/>
+
+  <circle cx="160" cy="45" r="5" class="pt"/>
+  <text x="120" y="26" class="sub2">t1 : sonde envoyée</text>
+  <path class="probe" d="M160 45 L330 200" marker-end="url(#ah2)"/>
+  <circle cx="330" cy="200" r="5" class="pt"/>
+  <text x="255" y="232" class="sub2">t2 : reçue, t3 : renvoyée</text>
+  <path class="probe" d="M340 200 L520 45" marker-end="url(#ah2)"/>
+  <circle cx="520" cy="45" r="5" class="pt"/>
+  <text x="480" y="26" class="sub2">t4 : retour</text>
+  <text x="555" y="120" class="sub2">aller-retour = (t4 − t1) − (t3 − t2)</text>
+  <text x="555" y="140" class="sub2">offset ≈ moyenne des écarts</text>
+  <text x="555" y="160" class="sub2">aller / retour</text>
+</svg>
+<figcaption>Avec les quatre horodatages, on déduit la durée de l'aller-retour et
+l'écart entre les deux horloges, en supposant l'aller et le retour symétriques.</figcaption>
+</figure>
+
+<p>Le code fait exactement ce calcul, dans <code>clock.ts</code> :</p>
+
+<pre><code><span class="k">function</span> measure(s: ProbeSample): Measured {
+  <span class="k">const</span> total = s.clientReceivedAt - s.clientSentAt;        <span class="c">// t4 − t1</span>
+  <span class="k">const</span> serverBusy = s.serverSentAt - s.serverReceivedAt;   <span class="c">// t3 − t2</span>
+  <span class="k">return</span> {
+    roundTripMs: total - serverBusy,
+    offsetMs: ((s.serverReceivedAt - s.clientSentAt)
+             + (s.serverSentAt - s.clientReceivedAt)) / <span class="n">2</span>,
+  };
+}</code></pre>
+
+<p><strong>La subtilité qui fait la qualité :</strong> le retard réseau ne peut
+qu'<em>ajouter</em> du temps, jamais en retirer. Une moyenne des échantillons
+traînerait donc ce biais avec elle. Le code garde plutôt une fenêtre des 8
+dernières sondes et fait confiance à <strong>celle qui a eu l'aller-retour le plus
+court</strong> — c'est celle qui a le moins été polluée par le réseau. Et tant que
+l'estimation n'a pas convergé (3 sondes minimum, dispersion sous 60&nbsp;ms), le
+client refuse de se déclarer prêt pour un départ.</p>
+
+<h3>2. Partir ensemble — barrier.ts et la timeline de room.ts</h3>
+
+<p><strong>Le problème :</strong> même à l'heure, si chacun démarre « à la réception
+du message », les délais réseau différents désynchronisent dès la première
+note.</p>
+
+<p><strong>La solution :</strong> un <em>rendez-vous dans le futur</em>. Le serveur
+n'ordonne jamais « joue maintenant » ; il orchestre une <strong>barrière</strong> :</p>
+
+<figure>
+<svg viewBox="0 0 880 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Étapes de la barrière de départ commun">
+  <style>
+    .st { fill: #ffffff; stroke: #7a5cb0; stroke-width: 2; rx: 10; }
+    .stl { font: 600 13.5px -apple-system, "Segoe UI", sans-serif; fill: #1f2430; }
+    .sts { font: 12px -apple-system, "Segoe UI", sans-serif; fill: #5c6370; }
+    .fl { stroke: #7a5cb0; stroke-width: 2; fill: none; }
+  </style>
+  <defs>
+    <marker id="ah3" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#7a5cb0"/>
+    </marker>
+  </defs>
+  <rect x="15" y="55" width="190" height="90" class="st"/>
+  <text x="30" y="80" class="stl">1. Barrière ouverte</text>
+  <text x="30" y="100" class="sts">« placez-vous tous</text>
+  <text x="30" y="116" class="sts">à la position P »</text>
+
+  <rect x="245" y="55" width="190" height="90" class="st"/>
+  <text x="260" y="80" class="stl">2. Chacun se prépare</text>
+  <text x="260" y="100" class="sts">seek + pause, puis</text>
+  <text x="260" y="116" class="sts">« prêt » quand l'horloge</text>
+  <text x="260" y="132" class="sts">a convergé</text>
+
+  <rect x="475" y="55" width="190" height="90" class="st"/>
+  <text x="490" y="80" class="stl">3. Tous prêts</text>
+  <text x="490" y="100" class="sts">le serveur fixe le départ :</text>
+  <text x="490" y="116" class="sts">instant serveur T</text>
+  <text x="490" y="132" class="sts">= maintenant + 500 ms</text>
+
+  <rect x="705" y="55" width="160" height="90" class="st"/>
+  <text x="720" y="80" class="stl">4. Chacun part</text>
+  <text x="720" y="100" class="sts">à T converti dans</text>
+  <text x="720" y="116" class="sts">son horloge locale</text>
+
+  <path class="fl" d="M205 100 L245 100" marker-end="url(#ah3)"/>
+  <path class="fl" d="M435 100 L475 100" marker-end="url(#ah3)"/>
+  <path class="fl" d="M665 100 L705 100" marker-end="url(#ah3)"/>
+  <text x="250" y="180" class="sts">Garde-fou : au-delà de 45 s d'attente, on part sans le retardataire —</text>
+  <text x="250" y="196" class="sts">sauf si personne n'est prêt (pub des deux côtés), auquel cas on prolonge.</text>
+</svg>
+<figcaption>La barrière : personne ne joue tant que tout le monde n'est pas prêt,
+puis tout le monde vise le même instant serveur.</figcaption>
+</figure>
+
+<p>Les 500&nbsp;ms de marge (<code>leadMs</code>) garantissent que l'instant de
+départ est encore dans le futur quand le message arrive. Et cette barrière sert
+<em>partout</em> : premier play, reprise après pause, retour après une pub, arrivée
+d'un participant en cours de lecture. Une seule machine à états pour tous les
+cas de « il faut repartir ensemble ».</p>
+
+<p>Côté serveur, chaque départ nourrit la <strong>timeline autoritaire</strong> de
+<code>room.ts</code> : « position P depuis l'instant T ». Avec ces deux nombres, le
+serveur peut répondre à tout moment à « où en est la lecture ? » — c'est ce qui
+permet de placer un arrivant, et de reprendre après pause là où on s'était
+arrêté.</p>
+
+<h3>3. Mesurer l'écart — timeline.ts</h3>
+
+<p>Une fois partis, chaque client sait calculer à tout instant <strong>où il
+devrait être</strong> :</p>
+
+<pre><code><span class="k">export function</span> targetPositionMs(start, offsetMs, localNowMs) {
+  <span class="k">const</span> serverNowMs = localNowMs + offsetMs;          <span class="c">// mon heure → heure serveur</span>
+  <span class="k">const</span> elapsed = serverNowMs - start.startAtServerMs; <span class="c">// temps écoulé depuis le départ</span>
+  <span class="k">return</span> start.positionMs + Math.max(<span class="n">0</span>, elapsed);     <span class="c">// position théorique</span>
+}</code></pre>
+
+<p>L'écart est alors <code>cible − position observée du lecteur</code> : positif si je
+suis en retard, négatif si je suis en avance. Le <code>Math.max(0, …)</code> a l'air
+anodin mais il porte la compensation du retard : si le message de départ arrive
+<em>après</em> l'instant T (réseau lent), le client ne repart pas de la position
+brute — il vise directement la position que les autres ont déjà atteinte.</p>
+
+<h3>4. Corriger sans que ça s'entende — corrector.ts</h3>
+
+<p><strong>Le problème :</strong> corriger un écart en sautant
+(<code>seek</code>) s'entend — la musique fait un accroc. La correction idéale est
+inaudible.</p>
+
+<p><strong>La solution :</strong> trois étages selon la taille de l'écart, et chaque
+seuil vient d'une mesure, pas d'une intuition :</p>
+
+<figure>
+<svg viewBox="0 0 860 190" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Les trois étages de correction">
+  <style>
+    .seg { stroke-width: 0; rx: 6; }
+    .segl { font: 700 14px -apple-system, "Segoe UI", sans-serif; }
+    .segs { font: 12.5px -apple-system, "Segoe UI", sans-serif; fill: #3d4350; }
+    .axis { font: 600 12px ui-monospace, Menlo, monospace; fill: #1f2430; }
+  </style>
+  <rect x="20" y="40" width="200" height="60" fill="#dfe8db" class="seg"/>
+  <rect x="228" y="40" width="380" height="60" fill="#f5e3c8" class="seg"/>
+  <rect x="616" y="40" width="220" height="60" fill="#f3d4cc" class="seg"/>
+  <text x="45" y="65" class="segl" fill="#4a7a3a">HOLD</text>
+  <text x="45" y="85" class="segs">on ne touche à rien</text>
+  <text x="255" y="65" class="segl" fill="#a06a1f">RATE</text>
+  <text x="255" y="85" class="segs">vitesse 1,05× ou 0,95× pendant la durée calculée</text>
+  <text x="640" y="65" class="segl" fill="#b5432a">SEEK</text>
+  <text x="640" y="85" class="segs">on saute à la cible</text>
+  <text x="20" y="130" class="axis">0</text>
+  <text x="195" y="130" class="axis">300 ms</text>
+  <text x="580" y="130" class="axis">3 000 ms</text>
+  <text x="20" y="160" class="segs">← sous le bruit de mesure de l'API (les positions arrivent toutes les ~266 ms) :</text>
+  <text x="20" y="178" class="segs">corriger ici reviendrait à corriger du bruit.</text>
+</svg>
+<figcaption>La décision de <code>decide()</code> : ignorer le bruit, résorber en
+douceur, sauter seulement quand la douceur prendrait trop longtemps.</figcaption>
+</figure>
+
+<p>L'étage du milieu est l'idée la plus fine du projet : plutôt que de sauter, on
+lit <strong>très légèrement plus vite ou plus lentement</strong> (1,05× est
+inaudible sur de la musique) pendant une durée calculée pour résorber exactement
+l'écart, puis on revient à la vitesse normale. Détail mesuré : le lecteur
+YouTube n'accepte que des vitesses par pas de 0,05 — le code reproduit cette
+grille pour savoir <em>vraiment</em> quelle vitesse sera appliquée, et calcule la
+durée avec.</p>
+
+<h3>5. Le chef d'orchestre — session.ts, une fois par seconde</h3>
+
+<p>Tout ce qui précède est passif : des fonctions qui attendent qu'on les appelle.
+<code>session.ts</code> est la boucle qui les fait vivre. Chaque seconde :</p>
+
+<ol class="steps">
+  <li><strong>Sonder l'horloge</strong> si c'est le moment (toutes les 2&nbsp;s).</li>
+  <li><strong>Observer le lecteur</strong> : position, fraîcheur, en lecture ou pas.</li>
+  <li><strong>Vérifier la stagnation</strong> : deux relevés figés d'affilée = pub ou
+  buffering → prévenir le serveur, qui met tout le monde en pause et rouvrira une
+  barrière (le détecteur d'un côté, la barrière de l'autre : c'est comme ça
+  qu'une pub chez ton ami met la musique en pause chez toi aussi).</li>
+  <li><strong>Rapporter sa position</strong> au serveur, qui la rediffuse — c'est ce qui
+  alimente le badge « écart avec l'autre » à l'écran.</li>
+  <li><strong>Fin de morceau ?</strong> Le dire au serveur, qui avance la file et ouvre
+  une barrière pour le morceau suivant.</li>
+  <li><strong>Mesurer l'écart et décider</strong> : hold, rate ou seek — avec une règle
+  maison : <em>une correction en cours va à son terme avant qu'on en décide une
+  autre</em>. Sans elle, la boucle relançait une correction à chaque tour sans
+  qu'aucune n'aboutisse, et l'écart oscillait sans fin. Ce bug a été trouvé par le
+  simulateur, pas par les tests — bonne anecdote d'entretien.</li>
+</ol>
+
+<h2>Un scénario complet, pour tout relier</h2>
+
+<p>Ton ami colle un lien pendant que vous écoutez déjà un morceau :</p>
+
+<ol class="steps">
+  <li>Son navigateur extrait l'identifiant (<code>lib/videoId.ts</code>) et envoie
+  <code>queue_add</code> (<code>transport/socket.ts</code> → <code>protocol.ts</code>).</li>
+  <li>Le serveur (<code>index.ts</code>) valide le message, appelle
+  <code>room.queueAdd()</code>, lance la récupération du titre
+  (<code>videoTitle.ts</code>), et rediffuse le nouvel état : la file s'allonge sur
+  vos deux écrans.</li>
+  <li>Le morceau en cours se termine chez toi en premier : ta session envoie
+  <code>track_ended</code>. Le serveur avance la file (<code>room.control("next")</code>)
+  et ouvre une barrière à la position 0 du nouveau morceau. Le même message
+  arrivant de ton ami une seconde plus tard est ignoré : il porte l'identifiant du
+  morceau précédent.</li>
+  <li>Vos deux lecteurs chargent la vidéo, se placent à 0, se déclarent prêts ;
+  le serveur fixe le départ à « maintenant + 500&nbsp;ms » ; vous démarrez sur la
+  même milliseconde.</li>
+  <li>Ensuite, chaque seconde, chaque client mesure son écart à la timeline et le
+  résorbe en douceur. La courbe de dérive enregistre tout.</li>
+</ol>
+
+<h2>Ce qu'il faut retenir (et savoir dire)</h2>
+
+<ol class="steps">
+  <li><strong>Le serveur est la source de vérité, les clients convergent vers elle.</strong>
+  Personne ne se synchronise « sur l'autre » : chacun se synchronise sur la
+  timeline du serveur, et l'écart entre les deux en découle.</li>
+  <li><strong>Le cœur est pur, les effets sont aux frontières.</strong> Le moteur
+  (<code>sync/</code>, <code>barrier.ts</code>, <code>room.ts</code>) ne connaît ni le
+  réseau ni YouTube : tout se teste avec des fonctions, et un simulateur peut le
+  faire tourner à vide.</li>
+  <li><strong>Chaque nombre a une provenance.</strong> 300&nbsp;ms, 3&nbsp;s, la grille de
+  0,05 : tout renvoie à une mesure documentée du banc <code>spike/</code>. C'est la
+  différence entre « ça a l'air de marcher » et « je sais pourquoi ça marche ».</li>
+</ol>
+
+<footer>Composed 2026-08-20 by ce-explain</footer>
+
+</main>
+</body>
+</html>

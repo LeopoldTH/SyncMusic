@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SyncMusic, comment marche le déploiement</title>
+<style>
+  :root {
+    --bg: #faf9f6;
+    --ink: #1f2430;
+    --muted: #5c6370;
+    --accent: #b5432a;
+    --client: #2a6db5;
+    --shared: #7a5cb0;
+    --server: #2a8a5c;
+    --card: #ffffff;
+    --line: #e3e0d8;
+    --code-bg: #23272e;
+    --code-ink: #d8dee9;
+    --code-comment: #7d8799;
+    --code-kw: #7fb4e8;
+    --code-str: #a3c98a;
+    --code-num: #e0a86c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  main { max-width: 62rem; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+  h1 { font-size: 2rem; margin: 0 0 0.5rem; letter-spacing: -0.02em; }
+  h2 {
+    font-size: 1.45rem; margin: 3rem 0 0.75rem;
+    padding-top: 1.5rem; border-top: 2px solid var(--line);
+    letter-spacing: -0.01em;
+  }
+  h3 { font-size: 1.1rem; margin: 2rem 0 0.5rem; }
+  p, ul, ol, dl { max-width: 70ch; }
+  a { color: var(--accent); }
+  .meta {
+    display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 1rem;
+    margin: 1rem 0 0; padding: 0.75rem 1rem;
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    font-size: 0.85rem; max-width: 46rem;
+  }
+  .meta dt { font-weight: 600; color: var(--muted); }
+  .meta dd { margin: 0; }
+  .lede { font-size: 1.1rem; color: var(--muted); max-width: 70ch; }
+  figure { margin: 1.5rem 0; }
+  figure svg { max-width: 100%; height: auto; display: block; }
+  figcaption { font-size: 0.85rem; color: var(--muted); margin-top: 0.5rem; max-width: 70ch; }
+  .filecard {
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    padding: 0.9rem 1.1rem; margin: 0.8rem 0; max-width: 70ch;
+  }
+  .filecard h4 { margin: 0 0 0.3rem; font-size: 0.95rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .filecard p { margin: 0.3rem 0; font-size: 0.92rem; }
+  .tag {
+    display: inline-block; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em;
+    text-transform: uppercase; padding: 0.1rem 0.5rem; border-radius: 999px; margin-left: 0.5rem;
+    vertical-align: middle;
+  }
+  .tag-toi { background: #e3edf8; color: var(--client); }
+  .tag-fly { background: #ece5f6; color: var(--shared); }
+  .tag-app { background: #e0f0e8; color: var(--server); }
+  pre {
+    background: var(--code-bg); color: var(--code-ink);
+    padding: 1rem 1.2rem; border-radius: 8px; overflow-x: auto;
+    font-size: 0.82rem; line-height: 1.55;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.88em; background: #efece4; padding: 0.05em 0.35em; border-radius: 4px;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .c { color: var(--code-comment); font-style: italic; }
+  .k { color: var(--code-kw); }
+  .s { color: var(--code-str); }
+  .n { color: var(--code-num); }
+  .callout {
+    border-left: 4px solid var(--accent); background: var(--card);
+    padding: 0.8rem 1.1rem; margin: 1.2rem 0; border-radius: 0 8px 8px 0;
+    max-width: 70ch; font-size: 0.95rem;
+  }
+  .callout strong:first-child { color: var(--accent); }
+  ol.steps { counter-reset: step; list-style: none; padding-left: 0; }
+  ol.steps > li {
+    counter-increment: step; position: relative; padding-left: 2.6rem; margin: 0.9rem 0;
+  }
+  ol.steps > li::before {
+    content: counter(step); position: absolute; left: 0; top: 0.1rem;
+    width: 1.8rem; height: 1.8rem; border-radius: 50%;
+    background: var(--ink); color: var(--bg); font-weight: 700; font-size: 0.85rem;
+    display: flex; align-items: center; justify-content: center;
+  }
+  table { border-collapse: collapse; font-size: 0.9rem; margin: 1rem 0; }
+  th, td { border: 1px solid var(--line); padding: 0.4rem 0.8rem; text-align: left; vertical-align: top; }
+  th { background: var(--card); }
+  .tablewrap { overflow-x: auto; max-width: 100%; }
+  .oui { color: var(--server); font-weight: 700; }
+  .non { color: var(--accent); font-weight: 700; }
+  footer {
+    margin-top: 4rem; padding-top: 1rem; border-top: 2px solid var(--line);
+    font-size: 0.8rem; color: var(--muted);
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>SyncMusic, comment marche le déploiement</h1>
+<p class="lede">Ce qu'est Fly, ce que fait vraiment <code>fly deploy</code>, le trajet
+d'une requête depuis le navigateur d'un visiteur, et surtout : ce qui survit à quoi.</p>
+
+<dl class="meta">
+  <dt>Date</dt><dd>2026-08-23</dd>
+  <dt>Sujet</dt><dd>Le déploiement de SyncMusic sur Fly.io : conteneur, machine, proxy, cycle de vie</dd>
+  <dt>Prérequis</dt><dd>Aucun. Écrit pour un premier déploiement.</dd>
+  <dt>En ligne</dt><dd><code>https://syncmusic-leopold.fly.dev</code> (depuis le 21/08/2026)</dd>
+</dl>
+
+<h2>Le problème : pourquoi ton Mac ne suffit pas</h2>
+
+<p>Tant que tu développes, ton app tourne sur ta machine et tu la visites sur
+<code>localhost</code>. Pour qu'un ami ou un recruteur puisse l'ouvrir, il faut quatre
+choses que ton Mac ne fournit pas :</p>
+
+<ol class="steps">
+  <li><strong>Une machine toujours allumée.</strong> Ton Mac s'endort, tu le fermes, tu
+  pars. Une app hébergée doit répondre à 3 h du matin.</li>
+  <li><strong>Une adresse fixe et publique.</strong> Ton Mac est derrière la box de ton
+  appartement, son adresse change, et rien depuis Internet ne peut le joindre
+  directement.</li>
+  <li><strong>Un certificat HTTPS.</strong> Ce n'est pas un luxe ici : le lecteur YouTube
+  embarqué <em>exige</em> HTTPS, sinon c'est l'erreur 153.</li>
+  <li><strong>Un environnement reproductible.</strong> Ton Mac a <em>ta</em> version de Node,
+  <em>tes</em> variables, <em>tes</em> outils. Le serveur doit avoir exactement ce qu'il
+  faut, ni plus ni moins.</li>
+</ol>
+
+<p>Le tunnel ngrok (voir <code>docs/ecouter-a-deux.md</code>) réglait 2 et 3, jamais 1 ni 4.
+C'était bien pour jouer un soir, pas pour un lien sur un CV.</p>
+
+<h2>Fly, en une phrase</h2>
+
+<p><strong>Fly.io est un hébergeur qui fait tourner des conteneurs sur de petites
+machines virtuelles réparties dans le monde.</strong> La tienne est à Paris (code
+<code>cdg</code>). Sa particularité, et la raison du choix : Fly sait faire tourner un
+<em>processus long</em> avec des <em>connexions maintenues</em>.</p>
+
+<div class="callout">
+<strong>Pourquoi c'est le critère décisif.</strong> Beaucoup d'hébergeurs modernes
+(Vercel, Netlify, les « serverless ») fonctionnent en mode « une requête arrive, une
+fonction se réveille, elle répond, elle meurt ». Ton app ne peut pas vivre comme ça :
+elle garde une connexion WebSocket ouverte en permanence avec chaque participant, et
+elle détient l'état des rooms en mémoire entre deux messages. Il lui faut un serveur
+qui <em>reste</em>.
+</div>
+
+<h2>Les trois briques à ne pas confondre</h2>
+
+<p>Presque toute la confusion sur le déploiement vient de mélanger ces trois choses.
+Elles sont distinctes, et chacune a son fichier ou son rôle.</p>
+
+<div class="filecard">
+  <h4>1. L'image <span class="tag tag-app">Dockerfile</span></h4>
+  <p>Un <strong>gabarit figé</strong> qui contient ton app <em>et</em> son environnement :
+  un Linux, Node 22, tes dépendances, ton code. 64 Mo dans notre cas. Une image ne
+  « tourne » pas, c'est un modèle, comme le moule d'une pièce.</p>
+</div>
+
+<div class="filecard">
+  <h4>2. La machine <span class="tag tag-fly">fly.toml → [[vm]]</span></h4>
+  <p>Une <strong>machine virtuelle</strong> qui exécute une copie de l'image. La tienne :
+  1 CPU partagé, 256 Mo de RAM. C'est elle qui a une mémoire vive, qui peut s'endormir,
+  et qui exécute réellement <code>server/index.ts</code>.</p>
+</div>
+
+<div class="filecard">
+  <h4>3. Le proxy <span class="tag tag-fly">fly.toml → [http_service]</span></h4>
+  <p>Le <strong>portier</strong> de Fly, devant ta machine. C'est lui qui possède l'adresse
+  <code>syncmusic-leopold.fly.dev</code>, lui qui détient le certificat HTTPS, lui qui
+  réveille la machine endormie, et lui qui transmet le trafic à ta machine sur le port
+  que tu lui indiques.</p>
+</div>
+
+<h2>Ce qui s'est passé quand tu as tapé <code>fly deploy</code></h2>
+
+<figure>
+<svg viewBox="0 0 940 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="La chaîne du déploiement, de ton Mac jusqu'au visiteur">
+  <style>
+    .bx { fill: #ffffff; stroke-width: 2; }
+    .t1 { font: 600 13px -apple-system, "Segoe UI", sans-serif; fill: #1f2430; }
+    .t2 { font: 11.5px -apple-system, "Segoe UI", sans-serif; fill: #5c6370; }
+    .zn { font: 700 12px -apple-system, "Segoe UI", sans-serif; }
+    .ar { stroke: #8a8f99; stroke-width: 2; fill: none; }
+    .al { font: italic 11.5px -apple-system, "Segoe UI", sans-serif; fill: #5c6370; }
+  </style>
+  <defs>
+    <marker id="a1" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#8a8f99"/>
+    </marker>
+  </defs>
+
+  <rect x="12" y="52" width="176" height="150" fill="#eef4fb" stroke="#2a6db5" stroke-dasharray="6 4" rx="12"/>
+  <text x="26" y="74" class="zn" fill="#2a6db5">chez toi</text>
+  <rect x="212" y="52" width="510" height="150" fill="#f2edf9" stroke="#7a5cb0" stroke-dasharray="6 4" rx="12"/>
+  <text x="228" y="74" class="zn" fill="#7a5cb0">infrastructure Fly</text>
+  <rect x="748" y="52" width="180" height="150" fill="#e0f0e8" stroke="#2a8a5c" stroke-dasharray="6 4" rx="12"/>
+  <text x="762" y="74" class="zn" fill="#2a8a5c">le visiteur</text>
+
+  <rect x="30" y="96" width="140" height="72" class="bx" stroke="#2a6db5" rx="8"/>
+  <text x="46" y="124" class="t1">Ton Mac</text>
+  <text x="46" y="144" class="t2">le code + le</text>
+  <text x="46" y="159" class="t2">Dockerfile</text>
+
+  <rect x="232" y="96" width="140" height="72" class="bx" stroke="#7a5cb0" rx="8"/>
+  <text x="248" y="124" class="t1">Le builder</text>
+  <text x="248" y="144" class="t2">exécute la recette,</text>
+  <text x="248" y="159" class="t2">fabrique l'image</text>
+
+  <rect x="404" y="96" width="140" height="72" class="bx" stroke="#7a5cb0" rx="8"/>
+  <text x="420" y="124" class="t1">Le registre</text>
+  <text x="420" y="144" class="t2">entrepôt d'images,</text>
+  <text x="420" y="159" class="t2">64 Mo rangés là</text>
+
+  <rect x="576" y="96" width="130" height="72" class="bx" stroke="#7a5cb0" rx="8"/>
+  <text x="592" y="120" class="t1">La machine</text>
+  <text x="592" y="140" class="t2">Paris, 256 Mo,</text>
+  <text x="592" y="155" class="t2">écoute sur 8787</text>
+
+  <rect x="766" y="96" width="146" height="72" class="bx" stroke="#2a8a5c" rx="8"/>
+  <text x="782" y="124" class="t1">Son navigateur</text>
+  <text x="782" y="144" class="t2">ouvre l'adresse</text>
+  <text x="782" y="159" class="t2">en https</text>
+
+  <path d="M170,132 L226,132" class="ar" marker-end="url(#a1)"/>
+  <text x="150" y="212" class="al">1. envoi du code</text>
+  <path d="M372,132 L398,132" class="ar" marker-end="url(#a1)"/>
+  <text x="316" y="236" class="al">2. build</text>
+  <path d="M544,132 L570,132" class="ar" marker-end="url(#a1)"/>
+  <text x="470" y="212" class="al">3. lancement de l'image</text>
+  <path d="M706,132 L760,132" class="ar" marker-end="url(#a1)" stroke-dasharray="5 4"/>
+  <text x="672" y="236" class="al">le proxy, entre les deux</text>
+
+  <rect x="700" y="248" width="70" height="30" fill="#fff5f2" stroke="#b5432a" rx="6"/>
+  <text x="712" y="268" class="t2" fill="#b5432a">proxy</text>
+  <path d="M735,246 L716,172" class="ar" stroke="#b5432a" stroke-dasharray="4 3"/>
+  <path d="M770,262 L800,262 L800,174" class="ar" stroke="#b5432a" stroke-dasharray="4 3"/>
+</svg>
+<figcaption>Ton code ne « part » pas tel quel sur un serveur : il est d'abord transformé
+en image par un builder distant, rangée dans un registre, puis exécutée par une machine.
+Le proxy de Fly reste devant en permanence.</figcaption>
+</figure>
+
+<p>Dans la sortie que tu as vue défiler, chaque étape correspond à une ligne :</p>
+
+<div class="tablewrap">
+<table>
+<tr><th>Ce que tu as lu</th><th>Ce que ça voulait dire</th></tr>
+<tr><td><code>Building image with Depot</code></td><td>Le build ne tourne pas sur ton Mac mais sur une machine de build de Fly. C'est pour ça que c'était rapide.</td></tr>
+<tr><td><code>[build 4/6] RUN npm ci</code></td><td>La recette du Dockerfile s'exécute, étape par étape.</td></tr>
+<tr><td><code>pushing layers</code></td><td>L'image finie est rangée dans le registre <code>registry.fly.io</code>.</td></tr>
+<tr><td><code>Provisioning ips</code></td><td>Ton app reçoit ses adresses publiques (une IPv6 dédiée, une IPv4 partagée).</td></tr>
+<tr><td><code>create 1 "app" machine</code></td><td>L'effet de <code>--ha=false</code> : une seule machine, pas deux.</td></tr>
+<tr><td><code>DNS configuration verified</code></td><td>Le nom <code>syncmusic-leopold.fly.dev</code> pointe bien vers ces adresses.</td></tr>
+</table>
+</div>
+
+<h2>Le Dockerfile, la recette expliquée</h2>
+
+<p>Le Dockerfile est écrit en <strong>deux étages</strong>, et c'est volontaire. Le premier
+étage a besoin de beaucoup d'outils pour construire ; le second n'en garde presque
+aucun.</p>
+
+<figure>
+<svg viewBox="0 0 900 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Le Dockerfile en deux étages">
+  <style>
+    .s1 { font: 600 13px -apple-system, "Segoe UI", sans-serif; fill: #1f2430; }
+    .s2 { font: 11.5px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #5c6370; }
+    .s3 { font: 700 12.5px -apple-system, "Segoe UI", sans-serif; }
+    .s4 { font: italic 12px -apple-system, "Segoe UI", sans-serif; fill: #5c6370; }
+    .ar2 { stroke: #2a8a5c; stroke-width: 2.5; fill: none; }
+  </style>
+  <defs>
+    <marker id="a2" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#2a8a5c"/>
+    </marker>
+  </defs>
+
+  <rect x="14" y="34" width="390" height="268" fill="#fdf3ef" stroke="#b5432a" stroke-dasharray="6 4" rx="12"/>
+  <text x="30" y="58" class="s3" fill="#b5432a">Étage 1 — l'atelier (jeté à la fin)</text>
+  <rect x="34" y="72" width="350" height="26" fill="#fff" stroke="#e3e0d8" rx="5"/>
+  <text x="44" y="90" class="s2">FROM node:22-alpine AS build</text>
+  <rect x="34" y="106" width="350" height="26" fill="#fff" stroke="#e3e0d8" rx="5"/>
+  <text x="44" y="124" class="s2">COPY package.json package-lock.json ./</text>
+  <rect x="34" y="140" width="350" height="26" fill="#fff" stroke="#e3e0d8" rx="5"/>
+  <text x="44" y="158" class="s2">RUN npm ci</text>
+  <text x="44" y="180" class="s4">toutes les dépendances, dev comprises</text>
+  <rect x="34" y="192" width="350" height="26" fill="#fff" stroke="#e3e0d8" rx="5"/>
+  <text x="44" y="210" class="s2">COPY . .</text>
+  <rect x="34" y="226" width="350" height="26" fill="#fff" stroke="#e3e0d8" rx="5"/>
+  <text x="44" y="244" class="s2">RUN npm run build</text>
+  <text x="44" y="266" class="s4">Vite compile le client → dist/</text>
+  <text x="44" y="288" class="s4">Vite, TypeScript, les tests : tout ça reste ici.</text>
+
+  <rect x="496" y="34" width="390" height="268" fill="#eef7f2" stroke="#2a8a5c" stroke-dasharray="6 4" rx="12"/>
+  <text x="512" y="58" class="s3" fill="#2a8a5c">Étage 2 — l'image livrée (64 Mo)</text>
+  <rect x="516" y="72" width="350" height="26" fill="#fff" stroke="#e3e0d8" rx="5"/>
+  <text x="526" y="90" class="s2">FROM node:22-alpine</text>
+  <rect x="516" y="106" width="350" height="26" fill="#fff" stroke="#e3e0d8" rx="5"/>
+  <text x="526" y="124" class="s2">RUN npm ci --omit=dev</text>
+  <text x="526" y="146" class="s4">seulement react, ws, zod, tsx</text>
+  <rect x="516" y="158" width="350" height="26" fill="#fff" stroke="#e3e0d8" rx="5"/>
+  <text x="526" y="176" class="s2">COPY --from=build /app/dist ./dist</text>
+  <rect x="516" y="192" width="350" height="26" fill="#fff" stroke="#e3e0d8" rx="5"/>
+  <text x="526" y="210" class="s2">COPY server ./server</text>
+  <rect x="516" y="226" width="350" height="26" fill="#fff" stroke="#e3e0d8" rx="5"/>
+  <text x="526" y="244" class="s2">COPY shared ./shared</text>
+  <rect x="516" y="260" width="350" height="26" fill="#fff" stroke="#e3e0d8" rx="5"/>
+  <text x="526" y="278" class="s2">CMD tsx server/index.ts</text>
+
+  <path d="M406,180 L490,180" class="ar2" marker-end="url(#a2)"/>
+  <text x="404" y="168" class="s4" fill="#2a8a5c">on ne garde</text>
+  <text x="404" y="204" class="s4" fill="#2a8a5c">que dist/</text>
+</svg>
+<figcaption>Le premier étage installe tout et compile. Le second repart d'un Linux propre
+et ne récupère que le résultat. L'image livrée ne contient donc ni Vite, ni TypeScript,
+ni tes tests : plus petite, plus rapide à démarrer, et moins de surface exposée.</figcaption>
+</figure>
+
+<div class="callout">
+<strong>Le détail qui a demandé un ajustement.</strong> <code>tsx</code> (l'outil qui exécute
+du TypeScript directement) était rangé dans <code>devDependencies</code>. Or l'étage 2
+installe avec <code>--omit=dev</code>, et la commande de démarrage en a besoin :
+il a fallu le déplacer en dépendance de production. Règle générale : <em>ce dont le
+serveur a besoin pour tourner</em> est une dépendance de production, même si ça
+ressemble à un outil de développement.
+</div>
+
+<h2>Le trajet d'une requête, quand quelqu'un ouvre ton lien</h2>
+
+<figure>
+<svg viewBox="0 0 920 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Trajet d'une requête depuis le navigateur jusqu'au serveur">
+  <style>
+    .u1 { font: 600 13px -apple-system, "Segoe UI", sans-serif; fill: #1f2430; }
+    .u2 { font: 11.5px -apple-system, "Segoe UI", sans-serif; fill: #5c6370; }
+    .u3 { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #5c6370; }
+    .ua { stroke: #8a8f99; stroke-width: 2; fill: none; }
+    .ul { font: italic 11.5px -apple-system, "Segoe UI", sans-serif; fill: #5c6370; }
+  </style>
+  <defs>
+    <marker id="a3" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#8a8f99"/>
+    </marker>
+  </defs>
+
+  <rect x="16" y="120" width="136" height="72" fill="#fff" stroke="#2a8a5c" stroke-width="2" rx="8"/>
+  <text x="32" y="148" class="u1">Navigateur</text>
+  <text x="32" y="168" class="u2">tape l'adresse</text>
+
+  <rect x="212" y="104" width="160" height="104" fill="#fff5f2" stroke="#b5432a" stroke-width="2" rx="8"/>
+  <text x="228" y="130" class="u1">Proxy Fly</text>
+  <text x="228" y="150" class="u2">déchiffre le HTTPS</text>
+  <text x="228" y="168" class="u2">réveille la machine</text>
+  <text x="228" y="186" class="u2">si elle dort</text>
+
+  <rect x="432" y="104" width="170" height="104" fill="#fff" stroke="#7a5cb0" stroke-width="2" rx="8"/>
+  <text x="448" y="130" class="u1">La machine</text>
+  <text x="448" y="150" class="u3">server/index.ts</text>
+  <text x="448" y="170" class="u2">un seul port pour</text>
+  <text x="448" y="188" class="u2">tout : 8787</text>
+
+  <rect x="676" y="40" width="228" height="84" fill="#fff" stroke="#2a6db5" stroke-width="2" rx="8"/>
+  <text x="692" y="66" class="u1">Page + fichiers</text>
+  <text x="692" y="86" class="u3">server/static.ts</text>
+  <text x="692" y="106" class="u2">sert dist/ (html, js, css)</text>
+
+  <rect x="676" y="192" width="228" height="84" fill="#fff" stroke="#2a6db5" stroke-width="2" rx="8"/>
+  <text x="692" y="218" class="u1">Connexion temps réel</text>
+  <text x="692" y="238" class="u3">WebSocketServer</text>
+  <text x="692" y="258" class="u2">reste ouverte, porte /ws</text>
+
+  <path d="M154,156 L206,156" class="ua" marker-end="url(#a3)"/>
+  <text x="140" y="230" class="ul">https://…</text>
+  <path d="M374,156 L426,156" class="ua" marker-end="url(#a3)"/>
+  <text x="344" y="256" class="ul">http vers le port 8787</text>
+  <path d="M604,140 L648,110 L670,92" class="ua" marker-end="url(#a3)"/>
+  <text x="600" y="120" class="ul">GET /</text>
+  <path d="M604,176 L648,206 L670,224" class="ua" marker-end="url(#a3)"/>
+  <text x="596" y="212" class="ul">upgrade /ws</text>
+
+  <rect x="212" y="256" width="390" height="62" fill="#fdf3ef" stroke="#b5432a" stroke-dasharray="5 4" rx="8"/>
+  <text x="228" y="278" class="u2"><tspan font-weight="700" fill="#b5432a">internal_port = 8787</tspan> dans fly.toml :</text>
+  <text x="228" y="298" class="u2">c'est la seule chose qui dit au proxy où frapper.</text>
+  <text x="228" y="313" class="u2">Mis à 80 par erreur, tout le reste devient inutile.</text>
+</svg>
+<figcaption>Le HTTPS s'arrête au proxy : entre le proxy et ta machine, le trafic circule
+en clair sur le réseau privé de Fly. Ton serveur n'a donc aucun certificat à gérer.</figcaption>
+</figure>
+
+<p>Deux choses méritent d'être notées ici, parce qu'elles expliquent des décisions
+prises bien avant le déploiement :</p>
+
+<ul>
+  <li><strong>Un seul port pour la page et le temps réel.</strong> Le serveur a été refondu
+  exprès pour ça (commit <code>6c608ec</code>). C'est ce qui permet de n'exposer qu'une
+  seule porte, et donc de n'avoir qu'un service à configurer chez Fly.</li>
+  <li><strong>Le client devine son adresse tout seul.</strong> Il dérive l'adresse WebSocket
+  de l'adresse de la page (<code>https://</code> devient <code>wss://</code>). Aucun réglage
+  par environnement, donc rien à changer entre ton Mac et la production.</li>
+</ul>
+
+<h2>fly.toml, ligne par ligne</h2>
+
+<div class="tablewrap">
+<table>
+<tr><th>Réglage</th><th>Ce qu'il fait</th><th>Pourquoi cette valeur ici</th></tr>
+<tr><td><code>primary_region = 'cdg'</code></td><td>Où la machine tourne physiquement</td><td>Paris : vous êtes en France, la latence compte pour une app de synchro</td></tr>
+<tr><td><code>internal_port = 8787</code></td><td>Le port où le proxy transmet</td><td>Doit être égal au port qu'écoute le serveur. La valeur par défaut du serveur est 8787</td></tr>
+<tr><td><code>force_https = true</code></td><td>Redirige tout le http vers https</td><td>Le lecteur YouTube l'exige, sinon erreur 153</td></tr>
+<tr><td><code>auto_stop_machines</code></td><td>Éteint la machine sans trafic</td><td>C'est ce qui fait descendre le coût à quelques centimes</td></tr>
+<tr><td><code>min_machines_running = 0</code></td><td>Autorise le zéro machine allumée</td><td>Personne ne joue la nuit ; le réveil prend une seconde</td></tr>
+<tr><td><code>ALLOWED_ORIGIN</code></td><td>Refuse les WebSockets venus d'ailleurs</td><td>Sans ça, un autre site pourrait piloter tes rooms depuis le navigateur d'un visiteur</td></tr>
+<tr><td><code>memory = '256mb'</code></td><td>La RAM de la machine</td><td>Des rooms en mémoire pour deux personnes tiennent très large</td></tr>
+</table>
+</div>
+
+<h2>Le point crucial : ce qui survit à quoi</h2>
+
+<p>C'est le modèle mental le plus important de tout ce document, et celui qui décidera
+de la suite du projet. Une machine Fly connaît deux événements très différents, et ils
+n'ont pas les mêmes conséquences.</p>
+
+<figure>
+<svg viewBox="0 0 900 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Ce qui survit au sommeil et au redéploiement">
+  <style>
+    .m1 { font: 600 13px -apple-system, "Segoe UI", sans-serif; fill: #1f2430; }
+    .m2 { font: 11.5px -apple-system, "Segoe UI", sans-serif; fill: #5c6370; }
+    .mh { font: 700 12.5px -apple-system, "Segoe UI", sans-serif; fill: #1f2430; }
+    .ok { font: 700 13px -apple-system, "Segoe UI", sans-serif; fill: #2a8a5c; }
+    .ko { font: 700 13px -apple-system, "Segoe UI", sans-serif; fill: #b5432a; }
+  </style>
+
+  <text x="300" y="34" class="mh">La machine s'endort</text>
+  <text x="300" y="52" class="m2">(plus de trafic, elle s'éteint)</text>
+  <text x="590" y="34" class="mh">Tu redéploies</text>
+  <text x="590" y="52" class="m2">(fly deploy, nouvelle image)</text>
+
+  <rect x="20" y="72" width="260" height="72" fill="#fff" stroke="#e3e0d8" rx="8"/>
+  <text x="36" y="100" class="m1">La mémoire vive</text>
+  <text x="36" y="122" class="m2">tes rooms, la timeline, la file</text>
+  <rect x="296" y="72" width="250" height="72" fill="#fdf3ef" stroke="#f0d5cb" rx="8"/>
+  <text x="378" y="116" class="ko">perdue</text>
+  <rect x="562" y="72" width="250" height="72" fill="#fdf3ef" stroke="#f0d5cb" rx="8"/>
+  <text x="644" y="116" class="ko">perdue</text>
+
+  <rect x="20" y="156" width="260" height="72" fill="#fff" stroke="#e3e0d8" rx="8"/>
+  <text x="36" y="184" class="m1">Le disque de la machine</text>
+  <text x="36" y="206" class="m2">un fichier que l'app écrirait</text>
+  <rect x="296" y="156" width="250" height="72" fill="#eef7f2" stroke="#cfe6da" rx="8"/>
+  <text x="374" y="200" class="ok">conservé</text>
+  <rect x="562" y="156" width="250" height="72" fill="#fdf3ef" stroke="#f0d5cb" rx="8"/>
+  <text x="640" y="192" class="ko">effacé</text>
+  <text x="592" y="212" class="m2">la machine est remplacée</text>
+
+  <rect x="20" y="240" width="260" height="72" fill="#fff" stroke="#2a8a5c" stroke-width="2" rx="8"/>
+  <text x="36" y="268" class="m1">Un volume Fly</text>
+  <text x="36" y="290" class="m2">disque séparé, à créer exprès</text>
+  <rect x="296" y="240" width="250" height="72" fill="#eef7f2" stroke="#cfe6da" rx="8"/>
+  <text x="374" y="284" class="ok">conservé</text>
+  <rect x="562" y="240" width="250" height="72" fill="#eef7f2" stroke="#cfe6da" rx="8"/>
+  <text x="640" y="284" class="ok">conservé</text>
+
+  <rect x="20" y="324" width="260" height="60" fill="#fff" stroke="#e3e0d8" rx="8"/>
+  <text x="36" y="350" class="m1">Les secrets et variables</text>
+  <text x="36" y="370" class="m2">gérés par Fly, hors de l'image</text>
+  <rect x="296" y="324" width="250" height="60" fill="#eef7f2" stroke="#cfe6da" rx="8"/>
+  <text x="374" y="360" class="ok">conservés</text>
+  <rect x="562" y="324" width="250" height="60" fill="#eef7f2" stroke="#cfe6da" rx="8"/>
+  <text x="640" y="360" class="ok">conservés</text>
+</svg>
+<figcaption>Aujourd'hui tout ce que l'app garde vit en mémoire vive, et c'est assumé :
+les rooms sont éphémères par design. La ligne du milieu est le piège classique du
+premier projet avec base de données.</figcaption>
+</figure>
+
+<div class="callout">
+<strong>À retenir absolument pour le chantier comptes.</strong> Le plan prévoit une base
+SQLite dans <code>data/syncmusic.db</code>. Sans volume, ce fichier vit sur le disque de la
+machine : il survivrait aux nuits, mais <strong>tous les comptes disparaîtraient au
+redéploiement suivant</strong>. Il faudra créer un volume Fly et pointer <code>DB_PATH</code>
+dessus. Bonus : un volume ne s'attache qu'à une seule machine, ce qui verrouille au
+passage la contrainte d'une machine unique.
+</div>
+
+<h2>Les trois pièges rencontrés en vrai</h2>
+
+<ol class="steps">
+  <li><strong><code>fly launch</code> réécrit ta config sans le dire.</strong> Même en
+  répondant « oui, garde mon fly.toml », il a supprimé tous les commentaires et remis
+  <code>internal_port</code> à 80, parce qu'il a cru voir un site statique. Déployé tel
+  quel : build vert, déploiement vert, et app injoignable, puisque le proxy aurait
+  frappé à une porte où personne n'écoute. <em>Toujours relire</em>
+  <code>git diff fly.toml</code> après un <code>fly launch</code>.</li>
+  <li><strong>Il crée aussi un fichier que tu n'as pas demandé.</strong> Un
+  <code>.github/workflows/fly-deploy.yml</code> qui redéploie à chaque push, avec un secret
+  qui n'existe pas : la CI serait devenue rouge en permanence. Repéré et retiré.
+  <em>Toujours relire</em> <code>git status</code> après un <code>fly launch</code>.</li>
+  <li><strong>Deux machines auraient cassé l'app en silence.</strong> Fly en crée deux par
+  défaut, pour la disponibilité. Mais tes rooms vivent dans la mémoire d'un seul
+  processus : avec deux machines, toi et ton ami pourriez atterrir chacun sur la sienne
+  et ne jamais vous voir, sans le moindre message d'erreur. D'où
+  <code>fly deploy --ha=false</code>.</li>
+</ol>
+
+<p>Ces trois points sont capturés durablement dans
+<code>docs/solutions/workflow-issues/fly-launch-reecrit-la-config.md</code>, avec la
+checklist à dérouler avant chaque déploiement.</p>
+
+<h2>Les commandes utiles au quotidien</h2>
+
+<div class="tablewrap">
+<table>
+<tr><th>Commande</th><th>Quand</th></tr>
+<tr><td><code>fly deploy --ha=false</code></td><td>Après un changement de code, pour le mettre en ligne</td></tr>
+<tr><td><code>fly logs</code></td><td>Voir ce que le serveur écrit, en direct. Le premier réflexe quand quelque chose cloche</td></tr>
+<tr><td><code>fly status</code></td><td>La machine tourne-t-elle, quelle version, depuis quand</td></tr>
+<tr><td><code>fly secrets set CLE=valeur</code></td><td>Pour une valeur sensible : chiffrée chez Fly, jamais dans le code</td></tr>
+<tr><td><code>fly volumes create data --size 1</code></td><td>Créer le disque durable (le jour de la base de données)</td></tr>
+<tr><td><code>fly apps destroy syncmusic-leopold</code></td><td>Tout supprimer et arrêter la facturation</td></tr>
+</table>
+</div>
+
+<h2>Ce qu'il faut retenir (et savoir dire)</h2>
+
+<ol class="steps">
+  <li><strong>Une image, une machine, un proxy.</strong> L'image est un gabarit figé qui
+  contient l'app et son environnement ; la machine exécute une copie de ce gabarit ; le
+  proxy détient l'adresse publique et le HTTPS. Confondre les trois, c'est ne pas savoir
+  où chercher quand ça casse.</li>
+  <li><strong>Le déploiement n'invente rien, il révèle.</strong> Les choix faits bien avant
+  (un seul port, le client qui devine son adresse, les rooms en mémoire) ont décidé de
+  la forme du déploiement. La configuration Fly n'est que la traduction de
+  l'architecture existante.</li>
+  <li><strong>Un conteneur est sans mémoire, sauf si tu le décides.</strong> Tout ce qui
+  n'est ni dans l'image, ni dans un volume, ni dans les secrets, disparaît au prochain
+  déploiement. C'est une bonne nouvelle pour la reproductibilité, et un piège pour les
+  données.</li>
+  <li><strong>Les outils qui « font tout pour toi » font aussi des choses à ta place.</strong>
+  <code>fly launch</code> a réécrit une config correcte et injecté un fichier non désiré.
+  Relire le diff après un générateur de code n'est pas de la méfiance, c'est la
+  procédure.</li>
+</ol>
+
+<footer>SyncMusic — explainer rédigé le 2026-08-23, après le déploiement du 21/08.
+Voir aussi <code>docs/explainers/2026-08-20-visite-guidee-du-code.html</code> pour
+l'architecture du code, et <code>docs/solutions/</code> pour les pièges capturés.</footer>
+
+</main>
+</body>
+</html>
