@@ -52,4 +52,4 @@ Non défini, toute origine est acceptée, ce qui est le bon réglage en dévelop
 
 ## Pour une démonstration durable
 
-Cette formule ne convient pas à un lien qu'on met sur un CV : l'adresse bouge et le service est éteint la plupart du temps. C'est un déploiement qu'il faut, et c'est une autre étape.
+Cette formule ne convient pas à un lien qu'on met sur un CV : l'adresse bouge et le service est éteint la plupart du temps. Ce déploiement existe désormais : `https://syncmusic-leopold.fly.dev` (Fly.io, réveil en une seconde au premier clic). Le tunnel ngrok reste l'option zéro-config quand on veut tester une version locale non déployée.

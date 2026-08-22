@@ -15,5 +15,8 @@ Points remontés en usage réel, hors du plan initial.
 
 ## Reste du plan
 
-- U10, déploiement. Demande un compte d'hébergement.
-- Les mesures 5, 6 et 7 de `docs/mesures-api-youtube.md`, dont le seuil audible qui ne peut venir que d'une écoute à deux.
+- Les mesures 5, 6 et 7 de `docs/mesures-api-youtube.md`, dont le seuil audible qui ne peut venir que d'une écoute à deux. Le déploiement (fait, voir ci-dessous) rend cette écoute possible sans tunnel.
+
+## Fait
+
+- U10, déploiement. L'app tourne sur Fly.io : `https://syncmusic-leopold.fly.dev` (2026-08-21). Repo public `https://github.com/LeopoldTH/SyncMusic`, CI verte. Gotchas du deploy dans `docs/solutions/workflow-issues/fly-launch-reecrit-la-config.md`.
