@@ -9,6 +9,7 @@ import { createSession } from "./sync/session";
 import { LOOP_MS, SYNC_THRESHOLDS } from "./sync/thresholds";
 import { parseVideoId } from "./lib/videoId";
 import { resolveServerUrl } from "./lib/serverUrl";
+import { readResume, saveResume, clearResume, type ResumeRecord } from "./lib/resume";
 import { RoomJoin } from "./components/RoomJoin";
 import { Queue } from "./components/Queue";
 import { Transport as TransportBar } from "./components/Transport";
@@ -44,6 +45,13 @@ export function App() {
     const stored = window.localStorage.getItem("syncmusic.latencyMs");
     return stored === null ? 0 : Number(stored);
   });
+  /*
+   * Reprise apres rafraichissement. Le ref porte la trace tant que la demande est en
+   * vol, et vaut donc aussi de drapeau: non-null signifie "on est en train de revenir",
+   * ce que `handle` doit savoir sans dependre d un etat qu il ne relit pas.
+   */
+  const pendingResume = useRef<ResumeRecord | null>(readResume(window.sessionStorage));
+  const [resuming, setResuming] = useState(() => pendingResume.current !== null);
   const session = useRef<ReturnType<typeof createSession> | null>(null);
   /*
    * Les messages arrives avant que le lecteur soit pret seraient perdus: le depart
@@ -63,7 +71,21 @@ export function App() {
     if (session.current) session.current.onServerMessage(message, atMs);
     else early.current.push({ message, atMs });
     switch (message.type) {
-      case "room_state":
+      case "room_state": {
+        /*
+         * La trace se reecrit a chaque etat recu: le nom retenu est celui que le
+         * serveur a valide et tronque, pas celui qu on croyait avoir envoye.
+         */
+        const me = message.participants.find((p) => p.id === message.youAre);
+        if (me) {
+          saveResume(window.sessionStorage, {
+            code: message.code,
+            participantId: message.youAre,
+            name: me.name,
+          });
+        }
+        pendingResume.current = null;
+        setResuming(false);
         setRoom({
           code: message.code,
           youAre: message.youAre,
@@ -74,6 +96,7 @@ export function App() {
         });
         setError(null);
         return;
+      }
       case "waiting":
         setWaitingFor(message.waitingFor);
         setWaitingSince((previous) => previous ?? Date.now());
@@ -83,6 +106,18 @@ export function App() {
         setWaitingSince(null);
         return;
       case "error":
+        /*
+         * Une erreur pendant la reprise dit que la room a disparu ou n a plus de place.
+         * Ce n est pas une faute de l utilisateur: on efface la trace devenue fausse et
+         * on rend l accueil avec une phrase lisible, plutot que le message technique.
+         */
+        if (pendingResume.current !== null) {
+          pendingResume.current = null;
+          clearResume(window.sessionStorage);
+          setResuming(false);
+          setError("Ta room precedente n existe plus.");
+          return;
+        }
         setError(message.message);
         return;
       default:
@@ -94,13 +129,36 @@ export function App() {
     const url = resolveServerUrl(import.meta.env as Record<string, string | undefined>, window.location);
     const socket = connect(url, {
       onMessage: handle,
-      onOpen: () => setConnected(true),
+      onOpen: () => {
+        setConnected(true);
+        /*
+         * On se remet dans sa room sans rien demander. Le serveur garde la place le
+         * temps du delai de grace: y revenir en une seconde, plutot que le temps de
+         * retaper un code, est ce qui rend ce delai suffisant.
+         */
+        const pending = pendingResume.current;
+        if (pending) socket.send({ type: "join_room", ...pending });
+      },
       onClose: () => setConnected(false),
       onProtocolError: (reason) => setError(`Message du serveur illisible: ${reason}`),
     });
     transport.current = socket;
     return () => socket.close();
   }, [handle]);
+
+  /*
+   * Filet: un serveur qui ne repond pas laisserait l ecran de reprise indefiniment.
+   * La trace n est pas effacee — l echec n est pas concluant, et le code memorise sert
+   * encore si l utilisateur rejoint a la main.
+   */
+  useEffect(() => {
+    if (!resuming) return;
+    const timer = setTimeout(() => {
+      pendingResume.current = null;
+      setResuming(false);
+    }, 5_000);
+    return () => clearTimeout(timer);
+  }, [resuming]);
 
   /*
    * Une erreur s efface toute seule. Un bandeau qui reste affiche apres coup devient
@@ -228,15 +286,38 @@ export function App() {
     : undefined;
 
   if (room === null) {
+    /*
+     * Pendant la reprise, ne pas montrer le formulaire: il clignoterait une demi-seconde
+     * avant de disparaitre, et donnerait a croire qu on a ete sorti de sa room.
+     */
+    if (resuming) {
+      return (
+        <main className="join">
+          <h1>SyncMusic</h1>
+          <p className="join__baseline">On te remet dans ta room...</p>
+        </main>
+      );
+    }
+
     const remember = (name: string) => {
       window.localStorage.setItem("syncmusic.pseudo", name);
       setPseudo(name);
     };
+    /*
+     * Chemin manuel, emprunte quand la reprise automatique n a pas abouti (serveur
+     * muet, ou room rejointe a la main). On ne rend son identifiant que pour la room a
+     * laquelle il appartient: ailleurs il ne veut rien dire.
+     */
+    const trace = readResume(window.sessionStorage);
     return (
       <RoomJoin
         initialName={pseudo}
         onCreate={(name) => { remember(name); send?.({ type: "create_room", name }); }}
-        onJoin={(code, name) => { remember(name); send?.({ type: "join_room", code, name }); }}
+        onJoin={(code, name) => {
+          remember(name);
+          const participantId = trace?.code === code ? trace.participantId : undefined;
+          send?.({ type: "join_room", code, name, participantId });
+        }}
         error={error}
       />
     );
