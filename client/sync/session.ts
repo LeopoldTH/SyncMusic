@@ -9,7 +9,7 @@
  */
 
 import { probeReplyIsCoherent, type ClientMessage, type ServerMessage } from "../../shared/protocol";
-import type { PlayerPort } from "../player/playerPort";
+import type { PlayerFault, PlayerPort } from "../player/playerPort";
 import { createClockEstimator } from "./clock";
 import { createDriftLog } from "./driftLog";
 import { decide, type Thresholds } from "./corrector";
@@ -42,6 +42,15 @@ export function createSession(deps: SessionDeps) {
    */
   let outputLatencyMs = 0;
   let lastObservedPositionMs = 0;
+  /*
+   * Pourquoi la lecture demandee n a pas eu lieu, ou null quand tout va bien.
+   *
+   * Etat derive, jamais un evenement: il se leve quand le lecteur refuse et retombe
+   * de lui-meme des que la lecture demarre. Un message ephemere ne conviendrait pas —
+   * tant que l utilisateur n a pas touche le lecteur, la consigne doit rester
+   * affichee, et elle doit disparaitre sans que personne pense a l effacer.
+   */
+  let playbackBlockedBy: PlayerFault["kind"] | null = null;
   const stalls = createStallDetector({ graceMs: STALL_GRACE_MS });
 
   return {
@@ -94,7 +103,13 @@ export function createSession(deps: SessionDeps) {
           const offset = clock.estimate().offsetMs;
           // La cible porte deja la compensation du retard si l instant est passe.
           player.seekTo(targetPositionMs(message, offset, nowMs), nowMs);
-          player.play({ automatic: true }, nowMs);
+          /*
+           * Un refus immediat se lit dans le retour; un refus silencieux du navigateur
+           * ne se voit qu au tour suivant, quand la position n a pas bouge. Les deux
+           * alimentent le meme etat.
+           */
+          const refused = player.play({ automatic: true }, nowMs);
+          if (refused !== null) playbackBlockedBy = refused.kind;
           stallAnnounced = false;
           return;
         }
@@ -128,6 +143,16 @@ export function createSession(deps: SessionDeps) {
       }
 
       const observation = player.observe(nowMs);
+
+      /*
+       * Le lecteur detectait deja le refus de lecture et le tenait a disposition;
+       * personne ne venait le chercher, et l utilisateur restait devant un bouton
+       * Lecture sans effet. Sur iPhone c est le cas nominal: un geste sur la page ne
+       * vaut pas geste dans le cadre YouTube, qui exige d etre touche lui-meme.
+       */
+      const fault = player.takeFault();
+      if (fault !== null) playbackBlockedBy = fault.kind;
+      if (observation.playing) playbackBlockedBy = null;
       lastObservedPositionMs = observation.positionMs;
       const verdict = stalls.observe({
         positionMs: observation.positionMs,
@@ -228,6 +253,11 @@ export function createSession(deps: SessionDeps) {
 
     correcting(): boolean {
       return inFlight !== null;
+    },
+
+    /** Pourquoi la lecture ne part pas, ou null. Retombe seule quand elle part. */
+    playbackBlockedBy(): PlayerFault["kind"] | null {
+      return playbackBlockedBy;
     },
 
     /** Etat interne, pour le diagnostic depuis la console. */

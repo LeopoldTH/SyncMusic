@@ -332,6 +332,18 @@ button, input {
   margin: 14px 0 0;
 }
 
+/* Consigne d action, pas une erreur: on attend un geste, rien n est casse. */
+.blocked {
+  color: var(--warn);
+  background: var(--warn-dim);
+  border: 1px solid #5c4a1c;
+  border-radius: 9px;
+  padding: 10px 12px;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  margin: 0 0 10px;
+}
+
 /* --- Ecrans etroits --------------------------------------------------------- */
 
 @media (max-width: 560px) {

@@ -39,6 +39,7 @@ export function App() {
   const [link, setLink] = useState("");
   const [now, setNow] = useState(() => Date.now());
   const [pairGap, setPairGap] = useState<number | null>(null);
+  const [playbackBlockedBy, setPlaybackBlockedBy] = useState<string | null>(null);
   const [drift, setDrift] = useState<readonly DriftPoint[]>([]);
   const [pseudo, setPseudo] = useState(() => window.localStorage.getItem("syncmusic.pseudo") ?? "");
   const [latencyMs, setLatencyMs] = useState(() => {
@@ -266,6 +267,7 @@ export function App() {
       current.tick(Date.now());
       setPairGap(current.pairGapMs());
       setDrift([...current.driftPoints()]);
+      setPlaybackBlockedBy(current.playbackBlockedBy());
     }, LOOP_MS);
     return () => clearInterval(timer);
   }, []);
@@ -359,6 +361,18 @@ export function App() {
       />
 
       <section className="stage">
+        {/*
+          * Consigne, pas notification: elle reste tant que la lecture ne part pas et
+          * disparait d elle-meme quand elle part. Placee contre le lecteur, puisque
+          * c est lui qu il faut toucher.
+          */}
+        {playbackBlockedBy === null ? null : (
+          <p className="blocked">
+            {playbackBlockedBy === "playback_refused"
+              ? "Ton navigateur refuse de lancer la lecture tout seul. Touche le lecteur ci-dessous une fois: ensuite tout se pilote normalement."
+              : "Le lecteur doit etre visible a l ecran pour demarrer. Fais-le defiler dans le cadre."}
+          </p>
+        )}
         <PlayerFrame />
         <div className="now">
           {current === null ? (

@@ -4,24 +4,41 @@ import { createClockEstimator } from "./clock";
 import { createDriftLog } from "./driftLog";
 import { SYNC_THRESHOLDS } from "./thresholds";
 import type { ClientMessage } from "../../shared/protocol";
-import type { PlayerObservation, PlayerPort } from "../player/playerPort";
+import type { PlayerFault, PlayerObservation, PlayerPort } from "../player/playerPort";
 
 function fakePlayer(observation: PlayerObservation) {
   const calls: string[] = [];
   let rateReset = false;
-  const port: PlayerPort & { calls: string[]; set(o: Partial<PlayerObservation>): void; queueRateReset(): void } = {
+  let pendingFault: PlayerFault | null = null;
+  let refusePlay: PlayerFault | null = null;
+  const port: PlayerPort & {
+    calls: string[];
+    set(o: Partial<PlayerObservation>): void;
+    queueRateReset(): void;
+    queueFault(f: PlayerFault): void;
+    refuseNextPlay(f: PlayerFault): void;
+  } = {
     calls,
     set(o) { Object.assign(observation, o); },
     queueRateReset() { rateReset = true; },
+    /** Le refus que le navigateur ne signale qu au tour suivant. */
+    queueFault(f) { pendingFault = f; },
+    /** Le refus que l adaptateur rend immediatement. */
+    refuseNextPlay(f) { refusePlay = f; },
     observe: () => observation,
     seekTo: (ms) => { calls.push("seek:" + Math.round(ms)); },
     setRate: (r) => { calls.push("rate:" + r); },
-    play: () => { calls.push("play"); return null; },
+    play: () => {
+      calls.push("play");
+      const r = refusePlay;
+      refusePlay = null;
+      return r;
+    },
     pause: () => { calls.push("pause"); },
     load: (v) => { calls.push("load:" + v); },
     takeRateReset: () => { const p = rateReset; rateReset = false; return p; },
     takeEnded: () => false,
-    takeFault: () => null,
+    takeFault: () => { const f = pendingFault; pendingFault = null; return f; },
   };
   return port;
 }
@@ -253,5 +270,64 @@ describe("reponse de sonde incoherente", () => {
     }
     // Aucune sonde acceptee: l estimation ne peut pas avoir converge.
     expect(clock.estimate().samples).toBe(0);
+  });
+});
+
+/*
+ * Sur iPhone, un geste sur la page ne vaut pas geste dans le cadre YouTube: la
+ * lecture pilotee est refusee en silence. Le lecteur le detectait deja, personne
+ * n allait chercher le resultat, et l utilisateur restait devant un bouton sans effet.
+ */
+describe("lecture refusee par le navigateur", () => {
+  it("ne signale rien tant que tout va bien", () => {
+    const obs: PlayerObservation = { positionMs: 60_000, fresh: true, playing: true };
+    const { session } = syncedSession(obs);
+    session.tick(60_000);
+    expect(session.playbackBlockedBy()).toBeNull();
+  });
+
+  it("retient le refus que le lecteur signale au tour suivant", () => {
+    const obs: PlayerObservation = { positionMs: 0, fresh: true, playing: false };
+    const { session, player } = syncedSession(obs);
+
+    player.queueFault({ kind: "playback_refused" });
+    session.tick(1_000);
+    expect(session.playbackBlockedBy()).toBe("playback_refused");
+  });
+
+  it("retient le refus rendu immediatement par le depart commun", () => {
+    const obs: PlayerObservation = { positionMs: 0, fresh: true, playing: false };
+    const { session, player } = syncedSession(obs);
+
+    player.refuseNextPlay({ kind: "not_visible" });
+    session.onServerMessage({ type: "common_start", barrierId: 2, positionMs: 0, startAtServerMs: 0 }, 1_000);
+    expect(session.playbackBlockedBy()).toBe("not_visible");
+  });
+
+  /*
+   * Le point de la consigne: elle doit s effacer quand l utilisateur a touche le
+   * lecteur, sans que personne ait a penser a l effacer.
+   */
+  it("retombe d elle-meme des que la lecture demarre", () => {
+    const obs: PlayerObservation = { positionMs: 0, fresh: true, playing: false };
+    const { session, player } = syncedSession(obs);
+
+    player.queueFault({ kind: "playback_refused" });
+    session.tick(1_000);
+    expect(session.playbackBlockedBy()).toBe("playback_refused");
+
+    player.set({ playing: true, positionMs: 500 });
+    session.tick(2_000);
+    expect(session.playbackBlockedBy()).toBeNull();
+  });
+
+  it("reste levee tant que la lecture ne part pas, sans nouveau signal", () => {
+    const obs: PlayerObservation = { positionMs: 0, fresh: true, playing: false };
+    const { session, player } = syncedSession(obs);
+
+    player.queueFault({ kind: "playback_refused" });
+    session.tick(1_000);
+    for (let i = 2; i < 8; i++) session.tick(i * 1_000);
+    expect(session.playbackBlockedBy()).toBe("playback_refused");
   });
 });
