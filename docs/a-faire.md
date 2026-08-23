@@ -12,6 +12,7 @@ Points remontés en usage réel, hors du plan initial.
 - Pause qui ne s'appliquait qu'à un écran. Commit `7cb8ebd`.
 - Reprise qui repartait du début du morceau. Commit `17534fd`.
 - Première lecture refusée quand l'onglet est en arrière-plan. Commit `f00d856`.
+- Rafraîchir la page sortait de la room, et la place gardée par le serveur rendait celle-ci injoignable jusqu'à sa destruction avec sa file. Un refresh n'en fait plus sortir du tout : l'onglet retient sa place et y revient seul. Commits `15f772e` et `e8b1f3e`, branche `fix/refresh-sort-de-la-room`, vérifié à deux fenêtres avec room pleine.
 
 ## Reste du plan
 
