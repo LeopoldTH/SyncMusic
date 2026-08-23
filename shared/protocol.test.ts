@@ -67,6 +67,26 @@ describe("messages invalides", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("code");
   });
+
+  it("accepte une arrivee sans identifiant de participant", () => {
+    const result = parseClientMessage({ type: "join_room", code: "ABCD", name: "Leo" });
+    expect(result.ok).toBe(true);
+  });
+
+  it("accepte une reprise de place avec un identifiant bien forme", () => {
+    const result = parseClientMessage({
+      type: "join_room", code: "ABCD", name: "Leo", participantId: "pa1b2c3d4e5f6",
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  /* Cette valeur devient une cle de map cote serveur et circule jusqu a l autre client. */
+  it("rejette un identifiant de participant qui n a pas la forme produite par le serveur", () => {
+    for (const participantId of ["", "leo", "p123", "P" + "a".repeat(12), "pa1b2c3d4e5f6x"]) {
+      const result = parseClientMessage({ type: "join_room", code: "ABCD", name: "Leo", participantId });
+      expect(result.ok).toBe(false);
+    }
+  });
 });
 
 describe("coherence d'une reponse de sonde", () => {
