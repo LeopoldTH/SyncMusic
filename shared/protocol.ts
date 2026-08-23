@@ -23,15 +23,28 @@ const VideoId = z.string().regex(/^[\w-]{11}$/, "identifiant de video YouTube: o
 /** Pseudo choisi par l utilisateur. Borne pour qu il tienne dans l interface. */
 const Pseudo = z.string().trim().min(1, "choisis un pseudo").max(20, "pseudo trop long");
 
+/*
+ * Identifiant de participant, au format exact que le serveur produit. Verifie
+ * strictement parce que cette valeur devient une cle de map cote serveur et circule
+ * jusqu a l autre participant: ce n est pas un endroit pour une chaine libre.
+ */
+const ParticipantId = z.string().regex(/^p[0-9a-f]{12}$/, "identifiant de participant invalide");
+
 export const CreateRoom = z.object({
   type: z.literal("create_room"),
   name: Pseudo,
 }).strict();
 
+/*
+ * `participantId` reprend une place apres un rafraichissement de page. Absent au
+ * premier passage. Ce n est pas une preuve d identite, seulement une demande: le
+ * serveur ne l honore que si la place existe et qu elle est libre.
+ */
 export const JoinRoom = z.object({
   type: z.literal("join_room"),
   code: RoomCode,
   name: Pseudo,
+  participantId: ParticipantId.optional(),
 }).strict();
 
 export const QueueAdd = z.object({

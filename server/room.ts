@@ -127,6 +127,21 @@ export function createRoom(code: string, config: RoomConfig) {
       p.disconnectedAt = nowMs;
     },
 
+    /*
+     * Une place est reprenable quand son occupant s est deconnecte et que le delai de
+     * grace court encore. C est ce qui rend un rafraichissement de page inoffensif: le
+     * client renvoie son identifiant et retrouve sa place, au lieu d en demander une
+     * troisieme dans une room qui n en a que deux.
+     *
+     * La place doit etre libre. Un onglet duplique copie le sessionStorage de
+     * l original, donc reclamerait un identifiant encore connecte: il devient un
+     * nouveau participant, il ne prend pas la place de celui qui ecoute.
+     */
+    reclaimable(participantId: string, nowMs: number): boolean {
+      const p = presence.get(participantId);
+      return p !== undefined && !p.connected && !expired(p, nowMs);
+    },
+
     /** Vraie seulement quand plus personne ne peut revenir. */
     isEmpty(nowMs: number): boolean {
       if (presence.size === 0) return true;

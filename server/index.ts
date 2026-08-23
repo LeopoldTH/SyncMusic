@@ -152,6 +152,16 @@ wss.on("connection", (socket) => {
     if (message.type === "join_room") {
       const room = registry.get(message.code);
       if (!room) return fail(socket, "room_not_found", "aucune room ne porte ce code");
+      /*
+       * Rafraichir la page tue la socket, donc l identite tiree a la connexion. Sans
+       * cette reprise le client revient en inconnu, se voit refuser une room dont il
+       * occupe encore une place, et la room finit par mourir avec sa file: le defaut
+       * remonte a l usage le 23/08/2026. Le delai de grace de la room existait deja,
+       * il ne servait a rien tant que personne ne rapportait son identifiant.
+       */
+      const claimed = message.participantId;
+      if (claimed !== undefined && room.reclaimable(claimed, now)) session.participantId = claimed;
+
       const joined = room.join(session.participantId, now, message.name);
       if (!joined.ok) return fail(socket, joined.code, joined.message);
       session.code = message.code;

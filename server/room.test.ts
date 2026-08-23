@@ -57,6 +57,53 @@ describe("arrivees et departs", () => {
   });
 });
 
+/*
+ * Le rafraichissement de page (defaut du 23/08/2026): la socket meurt, le client
+ * revient avec une identite neuve et se fait refuser une room dont il occupe deja une
+ * place. La reprise de place est ce qui rend le delai de grace utilisable.
+ */
+describe("reprise de place apres rafraichissement", () => {
+  it("declare reprenable une place laissee par une deconnexion recente", () => {
+    const room = roomWithTwo();
+    room.disconnect("pote", T0);
+    expect(room.reclaimable("pote", T0 + 1_000)).toBe(true);
+  });
+
+  it("refuse de rendre une place encore occupee par une connexion vivante", () => {
+    const room = roomWithTwo();
+    expect(room.reclaimable("pote", T0 + 1_000)).toBe(false);
+  });
+
+  it("refuse une place dont le delai de grace est ecoule", () => {
+    const room = roomWithTwo();
+    room.disconnect("pote", T0);
+    expect(room.reclaimable("pote", T0 + CFG.graceMs + 1)).toBe(false);
+  });
+
+  it("refuse une place qui n a jamais existe", () => {
+    const room = roomWithTwo();
+    expect(room.reclaimable("inconnu", T0 + 1_000)).toBe(false);
+  });
+
+  it("rend sa place au revenant sans consommer la seconde, file intacte", () => {
+    const room = roomWithTwo();
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0 + 500);
+    room.disconnect("pote", T0 + 1_000);
+
+    // Ce que fait le serveur quand le client rapporte son identifiant.
+    expect(room.reclaimable("pote", T0 + 2_000)).toBe(true);
+    const back = room.join("pote", T0 + 2_000, "pote");
+    expect(back.ok).toBe(true);
+    expect(room.state().participants).toHaveLength(2);
+    expect(room.state().queue).toHaveLength(1);
+
+    // Et sans la reprise, l identite neuve du meme humain se voit refuser la porte.
+    const asStranger = room.join("p000000000000", T0 + 2_100);
+    expect(asStranger.ok).toBe(false);
+    if (!asStranger.ok) expect(asStranger.code).toBe("room_full");
+  });
+});
+
 describe("file de lecture", () => {
   it("ajoute en fin de file", () => {
     const room = roomWithTwo();
