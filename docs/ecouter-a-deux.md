@@ -36,9 +36,28 @@ Ouvrir l'adresse, cliquer une fois sur **Visit Site** sur l'écran d'avertisseme
 ## Ce qu'il faut savoir
 
 - **L'adresse change à chaque redémarrage de ngrok.** C'est la contrainte de l'offre gratuite. Sans importance quand vous vous appelez pour jouer de toute façon.
-- **L'écran d'avertissement se clique une fois par navigateur.** Il ne revient pas ensuite.
+- **L'écran d'avertissement se clique une fois par navigateur**, quand il s'affiche. Voir la section suivante : sur mobile, il arrive qu'il ne s'affiche pas du tout.
 - **HTTPS est indispensable et vous l'avez.** ngrok le fournit, et le lecteur YouTube l'exige : sans lui, l'erreur 153 vous attend.
 - **Le serveur ne tourne que tant que la machine de l'hôte est allumée.** C'est le compromis assumé de cette formule.
+
+## Quand ngrok donne une page blanche sur téléphone
+
+Constaté le 23/08/2026, sur iPhone. Le symptôme est une page entièrement vide, sans bouton à cliquer.
+
+Ce n'est pas votre application : c'est l'écran d'avertissement de ngrok (`ERR_NGROK_6024`), et il est lui-même **rendu en JavaScript**. Son corps est un `<div id="root">` vide, rempli par un script et des polices chargés depuis `assets.ngrok.com`. Si le téléphone n'atteint pas ce domaine — bloqueur de contenu, Private Relay, réseau capricieux — rien n'est dessiné, et le bouton « Visit Site » n'existe jamais. D'où l'impasse : on ne peut pas cliquer ce qui n'a pas été affiché.
+
+Pour confirmer en dix secondes, ouvrir la même adresse en 4G, wifi coupé. Si elle s'affiche, c'est bien le réseau qui bloque les ressources de ngrok.
+
+**La solution, quand ça arrivera : un tunnel sans page d'avertissement.**
+
+```
+brew install cloudflared
+cloudflared tunnel --url http://localhost:8787
+```
+
+Il rend une adresse `https://…trycloudflare.com`, en HTTPS, sans aucun interstitiel et sans compte à créer. On ouvre, on est sur l'application.
+
+Ça vaut l'installation dès qu'on enchaîne les essais sur téléphone. Tant qu'on ne fait que déployer pour tester, ngrok reste inutile et cette section peut dormir.
 
 ## Verrouiller l'origine
 
