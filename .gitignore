@@ -3,3 +3,9 @@ dist/
 *.log
 .DS_Store
 .env
+
+# Base SQLite locale et ses fichiers de travail WAL.
+data/
+*.db
+*.db-shm
+*.db-wal

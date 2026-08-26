@@ -13,6 +13,7 @@ import { parseClientMessage, type ServerMessage } from "../shared/protocol";
 import { createRegistry, type Room } from "./roomRegistry";
 import { fetchVideoTitle } from "./videoTitle";
 import { createStaticHandler } from "./static";
+import { openDatabase, resolveDbPath } from "./db";
 
 const PORT = Number(process.env["PORT"] ?? 8787);
 
@@ -85,6 +86,15 @@ const ALLOWED_ORIGIN = process.env["ALLOWED_ORIGIN"] ?? null;
  */
 const distDir = join(dirname(fileURLToPath(import.meta.url)), "..", "dist");
 const serveStatic = createStaticHandler(distDir);
+
+/*
+ * Base ouverte au demarrage, migrations comprises (KTD3). Un schema en retard doit
+ * faire echouer le lancement, pas une requete au hasard une heure plus tard. Les
+ * rooms n en dependent pas: sans compte, l application marche exactement pareil (R3).
+ */
+const db = openDatabase(resolveDbPath(process.env["DB_PATH"], distDir));
+// Les sessions expirees ne servent plus a rien et s accumuleraient sans fin.
+db.deleteExpiredSessions(Date.now());
 
 const http = createServer((request, response) => {
   void serveStatic(request, response);

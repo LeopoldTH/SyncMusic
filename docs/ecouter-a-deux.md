@@ -50,6 +50,16 @@ ALLOWED_ORIGIN=https://ton-adresse.ngrok-free.dev npm start
 
 Non défini, toute origine est acceptée, ce qui est le bon réglage en développement local.
 
+## Où vivent les données
+
+Depuis le chantier comptes, le serveur ouvre une base SQLite à son démarrage : `data/syncmusic.db` sous le dossier du projet, sauf si `DB_PATH` en décide autrement. Le fichier et ses fichiers de travail WAL sont ignorés par git. En développement, rien à faire ; le supprimer repart d'une base vide.
+
+```
+DB_PATH=/chemin/vers/syncmusic.db npm start
+```
+
+En production, `DB_PATH` doit pointer dans le volume persistant (`/data` sur Fly.io, déjà réglé dans `fly.toml`). Ailleurs, la base repart de zéro à chaque redéploiement, comptes et historique compris.
+
 ## Pour une démonstration durable
 
 Cette formule ne convient pas à un lien qu'on met sur un CV : l'adresse bouge et le service est éteint la plupart du temps. Ce déploiement existe désormais : `https://syncmusic-leopold.fly.dev` (Fly.io, réveil en une seconde au premier clic). Le tunnel ngrok reste l'option zéro-config quand on veut tester une version locale non déployée.
