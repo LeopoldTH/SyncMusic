@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import type { Participant, QueueItem, ServerMessage } from "../shared/protocol";
 import { connect, type Transport } from "./transport/socket";
 import { loadYouTubeApi } from "./player/loadYouTubeApi";
@@ -11,6 +12,8 @@ import { parseVideoId } from "./lib/videoId";
 import { resolveServerUrl } from "./lib/serverUrl";
 import { readResume, saveResume, clearResume, type ResumeRecord } from "./lib/resume";
 import { RoomJoin } from "./components/RoomJoin";
+import { AccountScreen } from "./components/AccountScreen";
+import { fetchAccount, logout, saveAccountName, type Account } from "./lib/account";
 import { Queue } from "./components/Queue";
 import { Transport as TransportBar } from "./components/Transport";
 import { SyncBadge } from "./components/SyncBadge";
@@ -41,6 +44,12 @@ export function App() {
   const [pairGap, setPairGap] = useState<number | null>(null);
   const [drift, setDrift] = useState<readonly DriftPoint[]>([]);
   const [pseudo, setPseudo] = useState(() => window.localStorage.getItem("syncmusic.pseudo") ?? "");
+  /*
+   * `undefined` tant que /api/me n a pas repondu. Distinguer « pas encore su » de
+   * « invite » evite de faire clignoter le bouton de connexion au chargement.
+   */
+  const [account, setAccount] = useState<Account | null | undefined>(undefined);
+  const path = useLocation().pathname;
   const [latencyMs, setLatencyMs] = useState(() => {
     const stored = window.localStorage.getItem("syncmusic.latencyMs");
     return stored === null ? 0 : Number(stored);
@@ -170,6 +179,23 @@ export function App() {
     return () => clearTimeout(timer);
   }, [error]);
 
+  // Qui est connecte, s il y a quelqu un. Un serveur sans identifiants Google repond
+  // 404 ici, ce qui vaut invite: l application reste entiere sans compte (R3).
+  useEffect(() => {
+    void fetchAccount().then(setAccount);
+  }, []);
+
+  /*
+   * Retour d une connexion qui n a pas abouti (R12): refus du consentement, erreur
+   * Google, cookie perime. On le dit une fois puis on nettoie l adresse, sinon le
+   * message revient a chaque rafraichissement.
+   */
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("auth") !== "failed") return;
+    setError("La connexion Google n a pas abouti. Tu peux continuer en invite.");
+    window.history.replaceState(null, "", window.location.pathname);
+  }, []);
+
   // Une horloge d affichage: la barre d etat montre une duree qui doit avancer.
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1_000);
@@ -285,6 +311,41 @@ export function App() {
       }
     : undefined;
 
+  /*
+   * Les ecrans de compte se rendent ici, pas dans un composant monte a part: la socket
+   * vit dans cet effet, et une route qui demonterait App ferait sortir de la room le
+   * temps d aller regarder son nom.
+   */
+  if (path === "/compte") {
+    // Attendre la reponse avant de monter l ecran: il pre-remplit le champ avec le nom.
+    if (account === undefined) {
+      return (
+        <main className="join">
+          <h1>Mon compte</h1>
+          <p className="join__baseline">Un instant...</p>
+        </main>
+      );
+    }
+    return (
+      <AccountScreen
+        account={account}
+        error={error}
+        onSave={(name) => {
+          void saveAccountName(name).then((result) => {
+            if (result.ok) { setAccount({ name: result.name }); setError(null); }
+            else setError(result.reason);
+          });
+        }}
+        onLogout={() => {
+          /* Rechargement volontaire: la socket ouverte garde son identite jusqu a sa
+           * fermeture, donc se deconnecter sans recharger laisserait le nom de compte
+           * en room. */
+          void logout().then(() => window.location.assign("/"));
+        }}
+      />
+    );
+  }
+
   if (room === null) {
     /*
      * Pendant la reprise, ne pas montrer le formulaire: il clignoterait une demi-seconde
@@ -299,7 +360,12 @@ export function App() {
       );
     }
 
+    /*
+     * Le pseudo retenu est celui d un invite, jamais le nom d un compte: sinon se
+     * connecter une fois effacerait le pseudo qu on retrouve en se deconnectant.
+     */
     const remember = (name: string) => {
+      if (account) return;
       window.localStorage.setItem("syncmusic.pseudo", name);
       setPseudo(name);
     };
@@ -311,6 +377,7 @@ export function App() {
     const trace = readResume(window.sessionStorage);
     return (
       <RoomJoin
+        account={account}
         initialName={pseudo}
         onCreate={(name) => { remember(name); send?.({ type: "create_room", name }); }}
         onJoin={(code, name) => {

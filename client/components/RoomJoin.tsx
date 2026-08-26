@@ -1,17 +1,26 @@
 import { useState } from "react";
+import { AccountBar } from "./AccountBar";
+import type { Account } from "../lib/account";
 
 interface Props {
+  /** `undefined` tant que /api/me n a pas repondu, `null` pour un invite. */
+  account: Account | null | undefined;
   initialName: string;
   onCreate: (name: string) => void;
   onJoin: (code: string, name: string) => void;
   error: string | null;
 }
 
-export function RoomJoin({ initialName, onCreate, onJoin, error }: Props) {
+export function RoomJoin({ account, initialName, onCreate, onJoin, error }: Props) {
   const [name, setName] = useState(initialName);
   const [code, setCode] = useState("");
 
-  const pseudo = name.trim();
+  /*
+   * Connecte, le nom du compte fait autorite (KD5) et le champ pseudo disparait: le
+   * serveur ignorerait de toute facon ce qu on y taperait. Le protocole exige un nom
+   * non vide, donc on envoie celui du compte.
+   */
+  const pseudo = account ? account.name : name.trim();
   const ready = pseudo.length > 0;
 
   return (
@@ -19,17 +28,21 @@ export function RoomJoin({ initialName, onCreate, onJoin, error }: Props) {
       <h1>SyncMusic</h1>
       <p className="join__baseline">La meme musique, au meme instant, chacun chez soi.</p>
 
-      <label className="join__field">
-        <span>Ton pseudo</span>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Leo"
-          maxLength={20}
-          autoComplete="nickname"
-          aria-label="Ton pseudo"
-        />
-      </label>
+      <AccountBar account={account} />
+
+      {account ? null : (
+        <label className="join__field">
+          <span>Ton pseudo</span>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Leo"
+            maxLength={20}
+            autoComplete="nickname"
+            aria-label="Ton pseudo"
+          />
+        </label>
+      )}
 
       <button
         type="button"
@@ -61,7 +74,7 @@ export function RoomJoin({ initialName, onCreate, onJoin, error }: Props) {
         <button type="submit" className="btn" disabled={!ready}>Rejoindre</button>
       </form>
 
-      {ready ? null : <p className="hint join__nudge">Choisis un pseudo pour commencer.</p>}
+      {ready || account ? null : <p className="hint join__nudge">Choisis un pseudo pour commencer.</p>}
       {error === null ? null : <p className="error">{error}</p>}
     </main>
   );

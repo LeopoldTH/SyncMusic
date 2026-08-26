@@ -352,3 +352,35 @@ button, input {
 }
 .join__field input:focus, .join input:focus { outline: none; border-color: #3d4552; }
 .join__nudge { margin-top: 12px; }
+
+/* --- Compte ---------------------------------------------------------------- */
+
+/*
+ * La barre de compte n existe que sur l accueil (KD7). Elle doit se voir sans voler
+ * la vedette: creer une room reste le geste principal, le compte est facultatif.
+ */
+.account-bar {
+  margin: 0 0 22px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Meme hauteur que la barre remplie: sans elle, la page saute quand /api/me repond. */
+.account-bar--vide { min-height: 64px; border-bottom-color: transparent; }
+
+.account-bar__google { width: 100%; display: block; text-align: center; text-decoration: none; color: var(--text); }
+.account-bar__hint { margin-top: 8px; }
+.account-bar__name { display: block; font-size: 0.92rem; color: var(--muted); margin-bottom: 8px; }
+.account-bar__name strong { color: var(--text); font-weight: 600; }
+.account-bar__link { color: var(--accent); font-size: 0.86rem; text-decoration: none; }
+.account-bar__link:hover { text-decoration: underline; }
+
+/* `.join form` est une rangee, faite pour le couple code + Rejoindre. Ici le champ et
+   son bouton s empilent, sinon le nom se retrouve ecrase dans un tiers de la largeur. */
+.join form.account-screen__form { display: block; }
+
+.account-screen__foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line);
+}
+.account-screen__logout { color: var(--bad); }
