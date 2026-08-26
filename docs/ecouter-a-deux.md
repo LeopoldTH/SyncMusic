@@ -60,6 +60,28 @@ DB_PATH=/chemin/vers/syncmusic.db npm start
 
 En production, `DB_PATH` doit pointer dans le volume persistant (`/data` sur Fly.io, déjà réglé dans `fly.toml`). Ailleurs, la base repart de zéro à chaque redéploiement, comptes et historique compris.
 
+## Variables d'environnement
+
+Toutes se posent dans un fichier `.env` à la racine, chargé automatiquement par `npm start` et `npm run dev:server`. Le modèle commenté est `.env.example` : `cp .env.example .env` et remplir.
+
+| Variable | Obligatoire | À quoi elle sert |
+|---|---|---|
+| `BASE_URL` | oui | L'adresse publique réelle de l'app. Le serveur refuse de démarrer sans elle. |
+| `PORT` | non | Port d'écoute, 8787 par défaut. |
+| `DB_PATH` | non | Fichier SQLite, `data/syncmusic.db` par défaut. |
+| `GOOGLE_CLIENT_ID` | non | Identifiant du client OAuth. |
+| `GOOGLE_CLIENT_SECRET` | non | Secret du client OAuth. Ne jamais le committer. |
+
+**`BASE_URL` doit être l'adresse que le navigateur affiche vraiment**, pas celle du serveur derrière. Sous `npm run dev`, c'est `http://localhost:5173` (Vite renvoie `/auth`, `/api` et `/ws` vers le serveur) ; sous `npm run serve`, c'est `http://localhost:8787`. Elle doit correspondre à une redirect URI déclarée chez Google, sinon la connexion échoue sur `redirect_uri_mismatch`.
+
+**Sans les deux variables Google, l'application reste entièrement utilisable** : les routes de connexion répondent 404 et tout le monde est invité, exactement comme avant les comptes. C'est un mode de fonctionnement normal, pas une panne.
+
+En production, le secret ne passe pas par `fly.toml`, qui est dans le dépôt public :
+
+```
+fly secrets set GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=...
+```
+
 ## Pour une démonstration durable
 
 Cette formule ne convient pas à un lien qu'on met sur un CV : l'adresse bouge et le service est éteint la plupart du temps. Ce déploiement existe désormais : `https://syncmusic-leopold.fly.dev` (Fly.io, réveil en une seconde au premier clic). Le tunnel ngrok reste l'option zéro-config quand on veut tester une version locale non déployée.

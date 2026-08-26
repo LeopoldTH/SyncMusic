@@ -14,6 +14,7 @@ import { createRegistry, type Room } from "./roomRegistry";
 import { fetchVideoTitle } from "./videoTitle";
 import { createStaticHandler } from "./static";
 import { openDatabase, resolveDbPath } from "./db";
+import { createAuth, readAuthConfig } from "./auth";
 
 const PORT = Number(process.env["PORT"] ?? 8787);
 
@@ -96,8 +97,40 @@ const db = openDatabase(resolveDbPath(process.env["DB_PATH"], distDir));
 // Les sessions expirees ne servent plus a rien et s accumuleraient sans fin.
 db.deleteExpiredSessions(Date.now());
 
+/*
+ * BASE_URL est obligatoire (KTD5). Plutot que la trace d une exception, on rend le
+ * message d erreur du module: c est la premiere chose que voit quelqu un qui lance le
+ * serveur pour la premiere fois.
+ */
+const authConfig = (() => {
+  try {
+    return readAuthConfig(process.env);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+})();
+
+const auth = createAuth({ config: authConfig, db });
+
+/*
+ * Les routes de connexion passent avant le service des fichiers: sinon `/auth/login`
+ * repondrait la page d accueil. Tout ce qu elles ne reconnaissent pas retombe sur les
+ * fichiers construits, comportement inchange.
+ */
 const http = createServer((request, response) => {
-  void serveStatic(request, response);
+  void (async () => {
+    try {
+      if (await auth.handle(request, response)) return;
+      await serveStatic(request, response);
+    } catch (error) {
+      // Jamais l objet d erreur complet: son contexte peut porter un code OAuth.
+      console.error(`erreur sur ${request.method} ${request.url?.split("?")[0]}`);
+      void error;
+      if (!response.headersSent) response.writeHead(500, { "Content-Type": "text/plain" });
+      response.end("erreur serveur");
+    }
+  })();
 });
 
 const wss = new WebSocketServer({

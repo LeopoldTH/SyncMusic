@@ -13,6 +13,12 @@ export default defineConfig({
     port: 5173,
     // En developpement le client et le serveur vivent sur deux ports. Le renvoi evite
     // de coder une adresse en dur, ce que U10 interdit.
-    proxy: { "/ws": { target: "ws://localhost:8787", ws: true } },
+    proxy: {
+      "/ws": { target: "ws://localhost:8787", ws: true },
+      // Connexion et donnees de compte vivent sur le serveur, pas dans Vite. Le renvoi
+      // garde une seule origine cote navigateur, celle que BASE_URL declare a Google.
+      "/auth": { target: "http://localhost:8787" },
+      "/api": { target: "http://localhost:8787" },
+    },
   },
 });

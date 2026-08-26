@@ -9,14 +9,15 @@
     "dev": "vite",
     "build": "vite build",
     "sim": "tsx tools/simulate.ts",
-    "dev:server": "tsx server/index.ts",
-    "start": "tsx server/index.ts",
+    "dev:server": "tsx --env-file-if-exists=.env server/index.ts",
+    "start": "tsx --env-file-if-exists=.env server/index.ts",
     "serve": "npm run build && npm start"
   },
   "engines": {
     "node": ">=22"
   },
   "dependencies": {
+    "jose": "^6.2.10",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tsx": "^4.19.0",
