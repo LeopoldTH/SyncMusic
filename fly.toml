@@ -12,11 +12,10 @@ primary_region = 'cdg'
 
 [build]
 [env]
-  # Adresse publique reelle. Obligatoire depuis le chantier comptes: elle sert la
-  # redirect URI declaree chez Google et l origine autorisee. Le serveur refuse de
-  # demarrer sans. (ALLOWED_ORIGIN fait double emploi et disparaitra avec U3.)
+  # Adresse publique reelle. Obligatoire: elle sert a la fois la redirect URI declaree
+  # chez Google et la seule origine acceptee sur les sockets. Le serveur refuse de
+  # demarrer sans, plutot que de tourner en acceptant tout le monde.
   BASE_URL = 'https://syncmusic-leopold.fly.dev'
-  ALLOWED_ORIGIN = 'https://syncmusic-leopold.fly.dev'
   PORT = '8787'
   # Sur le volume monte ci-dessous, jamais dans le systeme de fichiers de la machine:
   # celui-ci repart de zero a chaque redeploiement, comptes et historique avec.

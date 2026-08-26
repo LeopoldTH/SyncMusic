@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { SignJWT, exportJWK, generateKeyPair, createLocalJWKSet, type JWTVerifyGetKey } from "jose";
 import { openDatabase, type Db } from "./db";
@@ -118,7 +118,7 @@ async function banc(options: {
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
   return {
-    db, jar,
+    db, jar, auth,
     get appelsTokenEndpoint() { return state.appels; },
     prochainJeton(jeton: string) { state.idToken = jeton; },
 
@@ -417,5 +417,69 @@ describe("routes inconnues", () => {
   it("repond 404 sous /api sans tomber sur les fichiers du client", async () => {
     const b = await banc();
     expect((await b.get("/api/inexistant")).status).toBe(404);
+  });
+});
+
+/** Faux upgrade: seuls les en-tetes comptent pour le controle d identite. */
+function upgrade(headers: { origin?: string; cookie?: string }): IncomingMessage {
+  return { headers } as IncomingMessage;
+}
+
+describe("identite du socket a l upgrade", () => {
+  it("accepte sans cookie et rend un invite (R3)", async () => {
+    const b = await banc();
+    const verdict = b.auth.checkUpgrade(upgrade({ origin: BASE_URL }));
+    expect(verdict).toEqual({ ok: true, user: null });
+  });
+
+  it("rend le compte quand le cookie porte une session valide", async () => {
+    const b = await banc();
+    await connecter(b);
+    const verdict = b.auth.checkUpgrade(upgrade({
+      origin: BASE_URL, cookie: `syncmusic_session=${b.jar.get("syncmusic_session")}`,
+    }));
+    expect(verdict.ok).toBe(true);
+    expect(verdict.ok && verdict.user?.name).toBe("Leopold Thomasset");
+  });
+
+  it("rend un nom deja tenu dans la borne du protocole (KD5)", async () => {
+    const b = await banc();
+    await connecter(b, (nonce) => idToken({ nonce, name: "Jean-Baptiste de la Fontaine" }));
+    const verdict = b.auth.checkUpgrade(upgrade({
+      origin: BASE_URL, cookie: `syncmusic_session=${b.jar.get("syncmusic_session")}`,
+    }));
+    expect(verdict.ok && verdict.user?.name).toBe("Jean-Baptiste de la ");
+    expect(verdict.ok && (verdict.user?.name.length ?? 0)).toBeLessThanOrEqual(20);
+  });
+
+  it("retombe en invite quand la session a ete revoquee entre-temps", async () => {
+    const b = await banc();
+    await connecter(b);
+    const cookie = `syncmusic_session=${b.jar.get("syncmusic_session")}`;
+    await b.post("/auth/logout");
+    // Deconnexion faite ailleurs: la socket s ouvre quand meme, en invite, sans erreur.
+    expect(b.auth.checkUpgrade(upgrade({ origin: BASE_URL, cookie }))).toEqual({ ok: true, user: null });
+  });
+
+  it("retombe en invite sur un cookie fabrique", async () => {
+    const b = await banc();
+    const verdict = b.auth.checkUpgrade(upgrade({
+      origin: BASE_URL, cookie: "syncmusic_session=identifiant-invente",
+    }));
+    expect(verdict).toEqual({ ok: true, user: null });
+  });
+
+  it("refuse une origine etrangere, cookie valide ou non (CSWSH)", async () => {
+    const b = await banc();
+    await connecter(b);
+    const cookie = `syncmusic_session=${b.jar.get("syncmusic_session")}`;
+    expect(b.auth.checkUpgrade(upgrade({ origin: "https://evil.example", cookie })).ok).toBe(false);
+    expect(b.auth.checkUpgrade(upgrade({ origin: "https://evil.example" })).ok).toBe(false);
+  });
+
+  it("refuse une origine absente", async () => {
+    const b = await banc();
+    const verdict = b.auth.checkUpgrade(upgrade({}));
+    expect(verdict).toMatchObject({ ok: false, status: 403 });
   });
 });

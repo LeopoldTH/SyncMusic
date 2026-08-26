@@ -13,6 +13,7 @@ import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createRemoteJWKSet, jwtVerify, type JWTPayload, type JWTVerifyGetKey } from "jose";
 import { z } from "zod";
+import { PSEUDO_MAX_CHARS } from "../shared/protocol";
 import type { Db, User } from "./db";
 
 /*
@@ -29,8 +30,6 @@ const GOOGLE = {
   issuers: ["https://accounts.google.com", "accounts.google.com"],
 } as const;
 
-/** Bornes du protocole de room: le nom de compte sert de pseudo, il tient dedans (KD5). */
-const NAME_MAX_CHARS = 20;
 const OAUTH_COOKIE_MAX_AGE_S = 10 * 60;
 const SESSION_COOKIE_MAX_AGE_S = 60 * 24 * 60 * 60;
 const TOKEN_TIMEOUT_MS = 8_000;
@@ -187,11 +186,11 @@ function accountName(claims: JWTPayload): string {
   const fromProfile = typeof name === "string" ? name.trim() : "";
   const fromEmail = typeof email === "string" ? (email.split("@")[0] ?? "") : "";
   const chosen = fromProfile || fromEmail || "Compte Google";
-  return chosen.slice(0, NAME_MAX_CHARS);
+  return chosen.slice(0, PSEUDO_MAX_CHARS);
 }
 
 const NameBody = z.object({
-  name: z.string().trim().min(1, "choisis un nom").max(NAME_MAX_CHARS, "nom trop long"),
+  name: z.string().trim().min(1, "choisis un nom").max(PSEUDO_MAX_CHARS, "nom trop long"),
 });
 
 export interface AuthDeps {
@@ -359,6 +358,26 @@ export function createAuth(deps: AuthDeps) {
 
   return {
     sessionFromCookies,
+
+    /*
+     * Identite du socket, etablie a l upgrade (KTD5). Deux controles, dans cet ordre:
+     *
+     * 1. l origine. Sans elle, n importe quel site ouvert dans le navigateur d un
+     *    visiteur peut ouvrir une socket vers ce serveur et piloter ses rooms en son
+     *    nom (CSWSH). Une origine absente est refusee au meme titre qu une origine
+     *    etrangere: un navigateur en envoie toujours une sur une poignee de main
+     *    WebSocket, donc son absence signale autre chose qu un navigateur;
+     * 2. le cookie. Absent, invalide ou revoque, la connexion est acceptee en invite:
+     *    ce n est jamais une erreur (R3).
+     */
+    checkUpgrade(request: IncomingMessage):
+      { ok: true; user: User | null } | { ok: false; status: number; reason: string } {
+      const origin = request.headers.origin;
+      if (origin === undefined || origin !== config.origin) {
+        return { ok: false, status: 403, reason: "origine refusee" };
+      }
+      return { ok: true, user: sessionFromCookies(request.headers.cookie)?.user ?? null };
+    },
 
     /** Rend true si la requete a ete traitee; false laisse la main au service statique. */
     async handle(request: IncomingMessage, response: ServerResponse): Promise<boolean> {

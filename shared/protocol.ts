@@ -21,7 +21,11 @@ const VideoId = z.string().regex(/^[\w-]{11}$/, "identifiant de video YouTube: o
 /* --- Client vers serveur --------------------------------------------------- */
 
 /** Pseudo choisi par l utilisateur. Borne pour qu il tienne dans l interface. */
-const Pseudo = z.string().trim().min(1, "choisis un pseudo").max(20, "pseudo trop long");
+/** Borne du pseudo affiche en room. Le nom d un compte connecte s y plie aussi (KD5). */
+export const PSEUDO_MAX_CHARS = 20;
+
+const Pseudo = z.string().trim().min(1, "choisis un pseudo")
+  .max(PSEUDO_MAX_CHARS, "pseudo trop long");
 
 /*
  * Identifiant de participant, au format exact que le serveur produit. Verifie

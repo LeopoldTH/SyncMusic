@@ -40,15 +40,15 @@ Ouvrir l'adresse, cliquer une fois sur **Visit Site** sur l'écran d'avertisseme
 - **HTTPS est indispensable et vous l'avez.** ngrok le fournit, et le lecteur YouTube l'exige : sans lui, l'erreur 153 vous attend.
 - **Le serveur ne tourne que tant que la machine de l'hôte est allumée.** C'est le compromis assumé de cette formule.
 
-## Verrouiller l'origine
+## L'origine du tunnel
 
-Le tunnel est public : n'importe qui connaissant l'adresse tombe sur l'application. Ce n'est pas grave en soi, il faut encore deviner un code de room, mais on peut restreindre les connexions temps réel à la seule origine du tunnel :
+Le tunnel est public : n'importe qui connaissant l'adresse tombe sur l'application. Il faut encore deviner un code de room, mais les connexions temps réel, elles, sont verrouillées sur une seule origine — celle que `BASE_URL` déclare. Avec ngrok, c'est l'adresse du tunnel :
 
 ```
-ALLOWED_ORIGIN=https://ton-adresse.ngrok-free.dev npm start
+BASE_URL=https://ton-adresse.ngrok-free.dev npm start
 ```
 
-Non défini, toute origine est acceptée, ce qui est le bon réglage en développement local.
+**Ce n'est plus optionnel.** Sans `BASE_URL`, le serveur refuse de démarrer ; avec une valeur qui ne correspond pas à l'adresse réellement ouverte dans le navigateur, l'application s'affiche mais aucune room ne fonctionne : la socket est refusée à l'ouverture. C'est voulu — sans ce contrôle, n'importe quel site ouvert dans le navigateur d'un visiteur pourrait ouvrir une socket vers ce serveur et piloter des rooms en son nom.
 
 ## Où vivent les données
 

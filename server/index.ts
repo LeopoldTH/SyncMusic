@@ -9,11 +9,11 @@ import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
-import { parseClientMessage, type ServerMessage } from "../shared/protocol";
+import { parseClientMessage, PSEUDO_MAX_CHARS, type ServerMessage } from "../shared/protocol";
 import { createRegistry, type Room } from "./roomRegistry";
 import { fetchVideoTitle } from "./videoTitle";
 import { createStaticHandler } from "./static";
-import { openDatabase, resolveDbPath } from "./db";
+import { openDatabase, resolveDbPath, type User } from "./db";
 import { createAuth, readAuthConfig } from "./auth";
 
 const PORT = Number(process.env["PORT"] ?? 8787);
@@ -32,6 +32,12 @@ const SWEEP_MS = 10_000;
 interface Session {
   participantId: string;
   code: string | null;
+  /*
+   * Le compte, fige a l ouverture de la socket (KTD5). Une deconnexion ou un
+   * changement de nom en cours de route ne s appliquent qu a la prochaine connexion:
+   * l identite d un socket se decide une fois, a l upgrade, jamais en cours de route.
+   */
+  user: User | null;
 }
 
 const registry = createRegistry(CONFIG);
@@ -43,6 +49,15 @@ const sessions = new Map<WebSocket, Session>();
  */
 function newParticipantId(): string {
   return "p" + randomBytes(6).toString("hex");
+}
+
+/*
+ * Connecte, le nom du compte fait autorite (KD5): le pseudo envoye par le client est
+ * ignore, et le meme nom vaut dans toutes les rooms. Invite, rien ne change. La coupe
+ * est une ceinture: le nom est deja borne a l enregistrement.
+ */
+function nameFor(session: Session, proposed: string): string {
+  return session.user ? session.user.name.slice(0, PSEUDO_MAX_CHARS) : proposed;
 }
 
 function send(socket: WebSocket, message: ServerMessage): void {
@@ -79,7 +94,9 @@ function fail(socket: WebSocket, code: ErrorCode, message: string): void {
 const MAX_PAYLOAD_BYTES = 16 * 1024;
 const MAX_ROOMS = 500;
 const MAX_MESSAGES_PER_10S = 200;
-const ALLOWED_ORIGIN = process.env["ALLOWED_ORIGIN"] ?? null;
+
+/** Chemin de la socket temps reel. Tout autre upgrade est ferme sans ceremonie. */
+const WS_PATH = "/ws";
 
 /*
  * Un seul port sert l application et les connexions temps reel. C est ce qui permet de
@@ -133,21 +150,29 @@ const http = createServer((request, response) => {
   })();
 });
 
-const wss = new WebSocketServer({
-  server: http,
-  maxPayload: MAX_PAYLOAD_BYTES,
-  /*
-   * Sans verification d origine, n importe quel site peut ouvrir une connexion vers
-   * ce serveur depuis le navigateur d un visiteur et piloter des rooms. Non defini en
-   * developpement, ou l origine varie; a renseigner au deploiement.
-   */
-  verifyClient: ALLOWED_ORIGIN === null
-    ? undefined
-    : ({ origin }, done) => done(origin === ALLOWED_ORIGIN, 403, "origine refusee"),
+/*
+ * `noServer`: c est nous qui traitons l upgrade, pas `ws`. La doc de `ws` deconseille
+ * `verifyClient`, et surtout le controle d origine et la lecture du cookie doivent se
+ * faire au meme endroit, avant qu une socket existe.
+ */
+const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES });
+
+http.on("upgrade", (request, socket, head) => {
+  if (new URL(request.url ?? "/", authConfig.origin).pathname !== WS_PATH) {
+    socket.destroy();
+    return;
+  }
+  const verdict = auth.checkUpgrade(request);
+  if (!verdict.ok) {
+    socket.write(`HTTP/1.1 ${verdict.status} ${verdict.reason}\r\nConnection: close\r\n\r\n`);
+    socket.destroy();
+    return;
+  }
+  wss.handleUpgrade(request, socket, head, (ws) => attachSocket(ws, verdict.user));
 });
 
-wss.on("connection", (socket) => {
-  sessions.set(socket, { participantId: newParticipantId(), code: null });
+function attachSocket(socket: WebSocket, user: User | null): void {
+  sessions.set(socket, { participantId: newParticipantId(), code: null, user });
   // Budget glissant de messages: une connexion qui inonde est fermee, pas servie.
   let budget = MAX_MESSAGES_PER_10S;
   const refill = setInterval(() => { budget = MAX_MESSAGES_PER_10S; }, 10_000);
@@ -187,7 +212,7 @@ wss.on("connection", (socket) => {
 
     if (message.type === "create_room") {
       const { code, room } = registry.create(now);
-      room.join(session.participantId, now, message.name);
+      room.join(session.participantId, now, nameFor(session, message.name));
       session.code = code;
       return broadcastState(code, room);
     }
@@ -205,7 +230,7 @@ wss.on("connection", (socket) => {
       const claimed = message.participantId;
       if (claimed !== undefined && room.reclaimable(claimed, now)) session.participantId = claimed;
 
-      const joined = room.join(session.participantId, now, message.name);
+      const joined = room.join(session.participantId, now, nameFor(session, message.name));
       if (!joined.ok) return fail(socket, joined.code, joined.message);
       session.code = message.code;
       broadcastState(message.code, room);
@@ -326,7 +351,7 @@ wss.on("connection", (socket) => {
     room.disconnect(session.participantId, Date.now());
     broadcastState(session.code, room);
   });
-});
+}
 
 setInterval(() => {
   const now = Date.now();
@@ -351,7 +376,8 @@ setInterval(() => registry.sweep(Date.now()), SWEEP_MS);
 
 http.listen(PORT, () => {
   console.log(`SyncMusic sur http://localhost:${PORT}`);
-  if (ALLOWED_ORIGIN === null) {
-    console.log("ALLOWED_ORIGIN non defini: toute origine est acceptee (developpement).");
+  console.log(`Origine attendue: ${authConfig.origin} (BASE_URL)`);
+  if (authConfig.clientId === null) {
+    console.log("Sans identifiants Google: application 100% invite, connexion desactivee.");
   }
 });

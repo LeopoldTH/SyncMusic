@@ -58,7 +58,7 @@ fly launch --no-deploy   # reprend fly.toml, choisir le nom d'app
 fly deploy --ha=false    # UNE machine: les rooms vivent en memoire
 ```
 
-Le `--ha=false` n'est pas une option d'économie : avec deux machines, deux participants peuvent atterrir sur deux mémoires différentes et ne jamais se voir. `ALLOWED_ORIGIN` dans `fly.toml` doit correspondre à l'adresse publique de l'app.
+Le `--ha=false` n'est pas une option d'économie : avec deux machines, deux participants peuvent atterrir sur deux mémoires différentes et ne jamais se voir. `BASE_URL` dans `fly.toml` doit correspondre à l'adresse publique de l'app : le serveur refuse de démarrer sans elle, et c'est la seule origine dont il accepte les connexions temps réel.
 
 Pour une session ponctuelle sans rien déployer, voir [`docs/ecouter-a-deux.md`](docs/ecouter-a-deux.md) (tunnel ngrok depuis la machine de l'un des deux).
 
