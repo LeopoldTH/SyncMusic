@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SyncMusic, comment marche la connexion Google</title>
+<style>
+  :root {
+    --bg: #faf9f6;
+    --ink: #1f2430;
+    --muted: #5c6370;
+    --accent: #b5432a;
+    --client: #2a6db5;
+    --shared: #7a5cb0;
+    --server: #2a8a5c;
+    --card: #ffffff;
+    --line: #e3e0d8;
+    --code-bg: #23272e;
+    --code-ink: #d8dee9;
+    --code-comment: #7d8799;
+    --code-kw: #7fb4e8;
+    --code-str: #a3c98a;
+    --code-num: #e0a86c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  main { max-width: 62rem; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+  h1 { font-size: 2rem; margin: 0 0 0.5rem; letter-spacing: -0.02em; }
+  h2 {
+    font-size: 1.45rem; margin: 3rem 0 0.75rem;
+    padding-top: 1.5rem; border-top: 2px solid var(--line);
+    letter-spacing: -0.01em;
+  }
+  h3 { font-size: 1.1rem; margin: 2rem 0 0.5rem; }
+  p, ul, ol, dl { max-width: 70ch; }
+  a { color: var(--accent); }
+  .meta {
+    display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 1rem;
+    margin: 1rem 0 0; padding: 0.75rem 1rem;
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    font-size: 0.85rem; max-width: 46rem;
+  }
+  .meta dt { font-weight: 600; color: var(--muted); }
+  .meta dd { margin: 0; }
+  .lede { font-size: 1.1rem; color: var(--muted); max-width: 70ch; }
+  figure { margin: 1.5rem 0; }
+  figure svg { max-width: 100%; height: auto; display: block; }
+  figcaption { font-size: 0.85rem; color: var(--muted); margin-top: 0.5rem; max-width: 70ch; }
+  .filecard {
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    padding: 0.9rem 1.1rem; margin: 0.8rem 0; max-width: 70ch;
+  }
+  .filecard h4 { margin: 0 0 0.3rem; font-size: 0.95rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .filecard p { margin: 0.3rem 0; font-size: 0.92rem; }
+  .tag {
+    display: inline-block; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em;
+    text-transform: uppercase; padding: 0.1rem 0.5rem; border-radius: 999px; margin-left: 0.5rem;
+    vertical-align: middle;
+  }
+  .tag-nav { background: #e3edf8; color: var(--client); }
+  .tag-goo { background: #ece5f6; color: var(--shared); }
+  .tag-app { background: #e0f0e8; color: var(--server); }
+  pre {
+    background: var(--code-bg); color: var(--code-ink);
+    padding: 1rem 1.2rem; border-radius: 8px; overflow-x: auto;
+    font-size: 0.82rem; line-height: 1.55;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.88em; background: #efece4; padding: 0.05em 0.35em; border-radius: 4px;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .c { color: var(--code-comment); font-style: italic; }
+  .k { color: var(--code-kw); }
+  .s { color: var(--code-str); }
+  .n { color: var(--code-num); }
+  .callout {
+    border-left: 4px solid var(--accent); background: var(--card);
+    padding: 0.8rem 1.1rem; margin: 1.2rem 0; border-radius: 0 8px 8px 0;
+    max-width: 70ch; font-size: 0.95rem;
+  }
+  .callout strong:first-child { color: var(--accent); }
+  ol.steps { counter-reset: step; list-style: none; padding-left: 0; }
+  ol.steps > li {
+    counter-increment: step; position: relative; padding-left: 2.6rem; margin: 0.9rem 0;
+  }
+  ol.steps > li::before {
+    content: counter(step); position: absolute; left: 0; top: 0.1rem;
+    width: 1.8rem; height: 1.8rem; border-radius: 50%;
+    background: var(--ink); color: var(--bg); font-weight: 700; font-size: 0.85rem;
+    display: flex; align-items: center; justify-content: center;
+  }
+  table { border-collapse: collapse; font-size: 0.9rem; margin: 1rem 0; }
+  th, td { border: 1px solid var(--line); padding: 0.4rem 0.8rem; text-align: left; vertical-align: top; }
+  th { background: var(--card); }
+  .tablewrap { overflow-x: auto; max-width: 100%; }
+  .oui { color: var(--server); font-weight: 700; }
+  .non { color: var(--accent); font-weight: 700; }
+  footer {
+    margin-top: 4rem; padding-top: 1rem; border-top: 2px solid var(--line);
+    font-size: 0.8rem; color: var(--muted);
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>SyncMusic, comment marche la connexion Google</h1>
+<p class="lede">Pourquoi on ne peut pas juste demander son nom à quelqu'un, ce que tu as
+réellement créé dans la console Google, et le trajet exact d'une connexion, du clic
+jusqu'au cookie.</p>
+
+<dl class="meta">
+  <dt>Date</dt><dd>2026-08-26</dd>
+  <dt>Sujet</dt><dd>Le flow OAuth « authorization code » et les sessions de SyncMusic (unité U2 du chantier comptes)</dd>
+  <dt>Prérequis</dt><dd>Aucun. Écrit pour une première connexion OAuth codée à la main.</dd>
+  <dt>Code</dt><dd><code>server/auth.ts</code>, <code>server/auth.test.ts</code>, <code>server/db.ts</code></dd>
+</dl>
+
+<h2>Le problème : le serveur ne peut croire personne</h2>
+
+<p>Aujourd'hui, quand tu rejoins une room, tu tapes un pseudo et le serveur te croit.
+C'est parfait pour un pseudo : si tu écris « Batman », personne n'est lésé.</p>
+
+<p>Ça s'effondre dès qu'on veut un <strong>historique d'écoute</strong>. Le serveur doit
+retrouver <em>tes</em> morceaux, pas ceux d'un autre. S'il te croit sur parole, alors
+n'importe qui écrivant « je suis Léopold » lit ton historique. Le pseudo est une
+étiquette ; là il faut une <strong>preuve</strong>.</p>
+
+<p>Fabriquer cette preuve soi-même, c'est stocker des mots de passe : les hacher
+correctement, gérer les fuites, les oublis, les réinitialisations par email. Beaucoup de
+travail, beaucoup de façons de se tromper, et une responsabilité qu'on ne veut pas.</p>
+
+<div class="callout">
+<strong>L'idée d'OAuth.</strong> Déléguer la preuve à quelqu'un qui la détient déjà.
+Google sait qui tu es, tu y es déjà connecté. SyncMusic ne lui demande pas ton mot de
+passe : il lui demande de <em>confirmer</em> ton identité, d'une manière que SyncMusic
+puisse vérifier tout seul.
+</div>
+
+<h2>Les trois acteurs, et ce que chacun ignore</h2>
+
+<p>Tout le mécanisme s'éclaire quand on regarde qui sait quoi. C'est délibéré : chaque
+acteur en sait le moins possible.</p>
+
+<div class="tablewrap">
+<table>
+<tr><th>Acteur</th><th>Ce qu'il sait</th><th>Ce qu'il ne saura jamais</th></tr>
+<tr>
+  <td><strong>Le navigateur</strong><span class="tag tag-nav">toi</span></td>
+  <td>Il transporte les messages et garde les cookies.</td>
+  <td>Le <code>client_secret</code>. Il ne voit jamais rien qui prouve à lui seul ton identité.</td>
+</tr>
+<tr>
+  <td><strong>SyncMusic</strong><span class="tag tag-app">serveur</span></td>
+  <td>Son <code>client_id</code>, son <code>client_secret</code>, et à la fin : ton identifiant Google, ton nom, ton email.</td>
+  <td>Ton mot de passe Google. Il ne le voit à aucun moment, et ne peut donc pas le perdre.</td>
+</tr>
+<tr>
+  <td><strong>Google</strong><span class="tag tag-goo">tiers</span></td>
+  <td>Qui tu es, et quelle application demande à te connaître.</td>
+  <td>Ce que tu écoutes sur SyncMusic. Il confirme une identité, il ne suit pas l'usage.</td>
+</tr>
+</table>
+</div>
+
+<h2>Ce que tu as créé dans la console, champ par champ</h2>
+
+<p>Les cinq écrans que tu as remplis ne sont pas de l'administratif. Chaque champ répond
+à une question précise du protocole.</p>
+
+<div class="filecard">
+<h4>client_id</h4>
+<p>Le nom public de ton application auprès de Google. Il voyage dans l'URL, tout le monde
+peut le lire, et ça n'a aucune importance : il <em>désigne</em> l'app, il ne prouve rien.</p>
+</div>
+
+<div class="filecard">
+<h4>client_secret</h4>
+<p>La preuve que c'est bien ton serveur qui parle. Il ne quitte jamais ton serveur, et
+c'est exactement ce qui rend ce flow sûr : le navigateur ne peut pas se faire passer pour
+l'app, parce qu'il n'a pas cette moitié-là.</p>
+</div>
+
+<div class="filecard">
+<h4>Authorized redirect URIs</h4>
+<p>La liste blanche des adresses où Google accepte de te renvoyer après le consentement.
+Sans elle, un attaquant fabriquerait un lien de connexion à ton app en demandant à Google
+de renvoyer le résultat <em>chez lui</em>. Google compare au caractère près : un port qui
+change, un slash final en trop, et c'est <code>redirect_uri_mismatch</code>.</p>
+</div>
+
+<div class="filecard">
+<h4>Scopes : openid, email, profile</h4>
+<p>Ce que l'app demande à savoir, et rien de plus. <code>openid</code> déclenche la
+délivrance d'un jeton d'identité ; les deux autres y ajoutent l'email et le nom
+d'affichage. Ce sont des scopes non sensibles : aucune validation Google à demander.</p>
+</div>
+
+<div class="filecard">
+<h4>Test users</h4>
+<p>Tant que l'app est en mode « testing », Google ne laisse passer que les comptes de
+cette liste. C'est ce qui te permet de développer sans faire vérifier ton app. C'est aussi
+le piège numéro un : liste vide, ta propre connexion est refusée.</p>
+</div>
+
+<h2>Le trajet complet</h2>
+
+<figure>
+<svg viewBox="0 0 900 500" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="Diagramme de séquence de la connexion Google">
+  <defs>
+    <marker id="fleche" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1f2430"/>
+    </marker>
+    <marker id="flecheR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b5432a"/>
+    </marker>
+  </defs>
+  <style>
+    .lane { font: 700 13px -apple-system, sans-serif; }
+    .lbl  { font: 12px -apple-system, sans-serif; fill: #1f2430; }
+    .lblm { font: 11px ui-monospace, Menlo, monospace; fill: #5c6370; }
+    .life { stroke: #d8d4ca; stroke-width: 2; stroke-dasharray: 4 5; }
+    .arw  { stroke: #1f2430; stroke-width: 1.6; marker-end: url(#fleche); }
+    .arwR { stroke: #b5432a; stroke-width: 1.8; marker-end: url(#flecheR); }
+  </style>
+
+  <rect x="30" y="18" width="160" height="30" rx="6" fill="#e3edf8" stroke="#2a6db5"/>
+  <text x="110" y="38" class="lane" fill="#2a6db5" text-anchor="middle">Navigateur</text>
+  <rect x="370" y="18" width="160" height="30" rx="6" fill="#e0f0e8" stroke="#2a8a5c"/>
+  <text x="450" y="38" class="lane" fill="#2a8a5c" text-anchor="middle">SyncMusic</text>
+  <rect x="710" y="18" width="160" height="30" rx="6" fill="#ece5f6" stroke="#7a5cb0"/>
+  <text x="790" y="38" class="lane" fill="#7a5cb0" text-anchor="middle">Google</text>
+
+  <line x1="110" y1="52" x2="110" y2="480" class="life"/>
+  <line x1="450" y1="52" x2="450" y2="480" class="life"/>
+  <line x1="790" y1="52" x2="790" y2="480" class="life"/>
+
+  <line x1="110" y1="82" x2="444" y2="82" class="arw"/>
+  <text x="277" y="76" class="lbl" text-anchor="middle">1. clic « Se connecter »</text>
+  <text x="277" y="96" class="lblm" text-anchor="middle">GET /auth/login</text>
+
+  <line x1="450" y1="126" x2="116" y2="126" class="arw"/>
+  <text x="283" y="120" class="lbl" text-anchor="middle">2. redirection, + cookie state.nonce</text>
+  <text x="283" y="140" class="lblm" text-anchor="middle">302 accounts.google.com</text>
+
+  <line x1="110" y1="172" x2="784" y2="172" class="arw"/>
+  <text x="447" y="166" class="lbl" text-anchor="middle">3. écran de consentement</text>
+
+  <line x1="790" y1="212" x2="116" y2="212" class="arw"/>
+  <text x="453" y="206" class="lbl" text-anchor="middle">4. redirection de retour</text>
+  <text x="453" y="226" class="lblm" text-anchor="middle">302 /auth/callback?code=…&amp;state=…</text>
+
+  <line x1="110" y1="262" x2="444" y2="262" class="arw"/>
+  <text x="277" y="256" class="lbl" text-anchor="middle">5. le navigateur remet le code</text>
+
+  <line x1="450" y1="308" x2="784" y2="308" class="arwR"/>
+  <text x="617" y="302" class="lbl" text-anchor="middle" fill="#b5432a">6. canal direct, hors navigateur</text>
+  <text x="617" y="322" class="lblm" text-anchor="middle">POST code + client_secret</text>
+
+  <line x1="790" y1="352" x2="456" y2="352" class="arwR"/>
+  <text x="623" y="346" class="lbl" text-anchor="middle" fill="#b5432a">7. jeton d'identité signé</text>
+  <text x="623" y="366" class="lblm" text-anchor="middle">id_token (JWT)</text>
+
+  <rect x="330" y="386" width="240" height="42" rx="6" fill="#fff" stroke="#e3e0d8"/>
+  <text x="450" y="403" class="lbl" text-anchor="middle">8. vérifie signature, state,</text>
+  <text x="450" y="419" class="lbl" text-anchor="middle">nonce, destinataire, expiration</text>
+
+  <line x1="450" y1="462" x2="116" y2="462" class="arw"/>
+  <text x="283" y="456" class="lbl" text-anchor="middle">9. cookie de session, retour à l'accueil</text>
+</svg>
+<figcaption>Les deux flèches rouges sont la partie qui ne passe pas par le navigateur.
+C'est là que se joue toute la sécurité du flow.</figcaption>
+</figure>
+
+<h3>Étape par étape, avec le vrai code</h3>
+
+<ol class="steps">
+<li><strong>Le clic.</strong> Un simple lien vers <code>/auth/login</code> sur ton propre
+serveur. Aucun JavaScript Google dans la page.</li>
+
+<li><strong>Le serveur prépare l'aller.</strong> Il tire deux valeurs au hasard,
+<code>state</code> et <code>nonce</code>, les range dans un cookie court, puis renvoie le
+navigateur chez Google :
+
+<pre><code><span class="c">// server/auth.ts</span>
+<span class="k">const</span> state = token();
+<span class="k">const</span> nonce = token();
+setCookie(response, names.oauth, <span class="s">`${state}.${nonce}`</span>, {
+  maxAgeSec: <span class="n">600</span>, secure: config.secure,
+});
+
+<span class="k">const</span> target = <span class="k">new</span> URL(GOOGLE.authorization);
+target.searchParams.set(<span class="s">"client_id"</span>, config.clientId);
+target.searchParams.set(<span class="s">"redirect_uri"</span>, redirectUri);
+target.searchParams.set(<span class="s">"response_type"</span>, <span class="s">"code"</span>);
+target.searchParams.set(<span class="s">"scope"</span>, <span class="s">"openid email profile"</span>);
+target.searchParams.set(<span class="s">"state"</span>, state);
+target.searchParams.set(<span class="s">"nonce"</span>, nonce);</code></pre>
+</li>
+
+<li><strong>Le consentement.</strong> Là, tu es sur un domaine Google, avec le cadenas
+Google. C'est le seul endroit où ton mot de passe peut être tapé, et ce n'est pas notre
+page. C'est la propriété principale du système.</li>
+
+<li><strong>Le retour.</strong> Google renvoie le navigateur vers ta redirect URI avec
+deux paramètres : un <code>code</code>, et le <code>state</code> que tu avais envoyé.</li>
+
+<li><strong>Le code arrive sur ton serveur.</strong> Seul, il ne vaut rien. C'est un
+ticket à usage unique, valable quelques minutes, échangeable seulement par qui détient le
+secret.</li>
+
+<li><strong>L'échange, hors du navigateur.</strong> Ton serveur appelle Google
+directement, en présentant le code <em>et</em> le <code>client_secret</code>. Cette
+requête ne traverse aucune machine que tu ne contrôles pas.</li>
+
+<li><strong>Le jeton d'identité.</strong> Google répond un <code>id_token</code> : un JWT
+signé qui contient ton identifiant permanent (<code>sub</code>), ton email, ton nom.</li>
+
+<li><strong>La vérification.</strong> Le point critique. Un JWT n'est <em>pas</em> chiffré :
+n'importe qui peut le lire, et n'importe qui peut en fabriquer un faux. Ce qui compte,
+c'est la signature.
+
+<pre><code><span class="c">// jose verifie la signature contre les cles publiques de Google,</span>
+<span class="c">// l emetteur, le destinataire et l expiration.</span>
+<span class="k">const</span> { payload } = <span class="k">await</span> jwtVerify(idToken, jwks, {
+  issuer: [...GOOGLE.issuers],
+  audience: config.clientId,
+});
+<span class="k">if</span> (payload.nonce !== nonce) <span class="k">return</span> failed();</code></pre>
+</li>
+
+<li><strong>La session.</strong> Le serveur enregistre le compte, crée une session, pose
+un cookie, et te ramène à l'accueil connecté.</li>
+</ol>
+
+<div class="callout">
+<strong>Pourquoi un code plutôt que le jeton directement ?</strong> Une variante ancienne
+d'OAuth renvoyait le jeton d'identité dans l'URL de retour. Le jeton passait alors par
+l'historique du navigateur, les logs des proxies, le header <code>Referer</code>. Le code
+d'autorisation corrige ça : ce qui transite par le navigateur est inutilisable seul, et ce
+qui est utilisable ne transite jamais par lui.
+</div>
+
+<h2>Les trois gardes, et l'attaque que chacun arrête</h2>
+
+<div class="tablewrap">
+<table>
+<tr><th>Garde</th><th>Ce qu'il fait</th><th>L'attaque sans lui</th></tr>
+<tr>
+  <td><code>state</code></td>
+  <td>Une valeur au hasard, posée en cookie à l'aller, comparée au retour.</td>
+  <td>Un attaquant t'envoie un lien de callback portant <em>son</em> code. Tu cliques, et
+  ton navigateur se retrouve connecté à <em>son</em> compte. Tout ce que tu ajoutes
+  ensuite atterrit chez lui.</td>
+</tr>
+<tr>
+  <td><code>nonce</code></td>
+  <td>Une valeur au hasard envoyée à l'aller, que Google recopie dans le jeton.</td>
+  <td>Un jeton d'identité valide, obtenu ailleurs pour une autre session, est rejoué ici.
+  Le nonce lie le jeton à <em>cette</em> tentative de connexion précise.</td>
+</tr>
+<tr>
+  <td>La signature</td>
+  <td>Vérifiée contre les clés publiques de Google, avec l'émetteur, le destinataire et
+  l'expiration.</td>
+  <td>Un JWT fabriqué de toutes pièces avec <code>sub</code> = ton identifiant. Sans
+  vérification de signature, il passe.</td>
+</tr>
+</table>
+</div>
+
+<p>Le cookie de <code>state</code> est <strong>à usage unique</strong> : il s'efface au
+début du callback, avant toute vérification. Sans ça, rejouer la même URL de retour
+rejouerait la connexion.</p>
+
+<h2>Après la connexion : la session</h2>
+
+<p>Le jeton Google a fait son travail et ne sert plus. Ce qui te garde connecté, c'est une
+session à nous.</p>
+
+<h3>Une session opaque, pas un JWT</h3>
+
+<p>On aurait pu signer un jeton et le poser en cookie. On a choisi un identifiant tiré au
+hasard, dont la base garde la trace. La raison tient en un mot : <strong>révocable</strong>.
+Se déconnecter supprime une ligne, et la session ne vaut plus rien dans la seconde. Un JWT
+signé, lui, reste valide jusqu'à son expiration, quoi qu'on fasse.</p>
+
+<h3>La base ne garde jamais le cookie</h3>
+
+<pre><code><span class="c">// server/db.ts — seule l empreinte est stockee</span>
+<span class="k">function</span> fingerprint(rawId: <span class="k">string</span>): <span class="k">string</span> {
+  <span class="k">return</span> createHash(<span class="s">"sha256"</span>).update(rawId).digest(<span class="s">"hex"</span>);
+}</code></pre>
+
+<p>Le navigateur détient la valeur en clair, la base son SHA-256. Une fuite du fichier
+<code>.db</code>, ou d'une vieille sauvegarde, ne livre aucune session utilisable : on ne
+remonte pas d'une empreinte à la valeur. Pas de sel ni d'algorithme lent ici, contrairement
+aux mots de passe : la valeur est déjà 128 bits tirés au hasard, il n'y a rien à deviner.</p>
+
+<h3>Les attributs du cookie, un par un</h3>
+
+<div class="tablewrap">
+<table>
+<tr><th>Attribut</th><th>Pourquoi</th></tr>
+<tr><td><code>HttpOnly</code></td><td>Le JavaScript de la page ne peut pas le lire. Une faille XSS ne donne pas la session.</td></tr>
+<tr><td><code>SameSite=Lax</code></td><td>Pas <code>Strict</code> : le retour de Google est une navigation venue d'un autre site, et <code>Strict</code> ferait ignorer le cookie au callback. La connexion échouerait sans le moindre message.</td></tr>
+<tr><td><code>Secure</code> et <code>__Host-</code></td><td>Seulement en HTTPS. Safari refuse <code>Secure</code> sur <code>http://localhost</code> : en développement on retombe sur un nom simple, sinon le navigateur jette le cookie en silence.</td></tr>
+<tr><td><code>Max-Age</code> glissant</td><td>60 jours, repoussés à chaque visite, mais jamais au-delà de 180 jours depuis la connexion. Le plafond dur borne ce qu'une session volée reste utilisable.</td></tr>
+</table>
+</div>
+
+<h2>Ce qui casse en vrai</h2>
+
+<ol class="steps">
+<li><strong><code>redirect_uri_mismatch</code>.</strong> L'adresse envoyée ne figure pas au
+caractère près dans la liste Google. Presque toujours un port ou un slash final. C'est
+aussi pourquoi <code>BASE_URL</code> est obligatoire et jamais déduite du header
+<code>Host</code>, qu'un client choisit librement.</li>
+
+<li><strong>« Accès bloqué » au consentement.</strong> Ton compte n'est pas dans les test
+users. L'app est en mode testing, Google ne laisse passer personne d'autre.</li>
+
+<li><strong>La connexion tourne en rond, sans erreur.</strong> Le symptôme d'un cookie
+jeté : <code>SameSite=Strict</code>, ou <code>Secure</code> posé sur du HTTP. Le navigateur
+ne signale rien, le serveur voit juste un cookie manquant.</li>
+
+<li><strong><code>BASE_URL</code> pointe au mauvais endroit.</strong> Sous
+<code>npm run dev</code>, l'app vit sur le port 5173 et Vite renvoie <code>/auth</code>
+vers 8787 : <code>BASE_URL</code> doit être <code>http://localhost:5173</code>, l'adresse
+que le navigateur affiche vraiment. Sous <code>npm run serve</code>, c'est 8787.</li>
+</ol>
+
+<div class="callout">
+<strong>Sans identifiants Google, rien ne casse.</strong> Si les deux variables sont
+absentes, les routes de connexion répondent 404 et l'application reste entièrement
+utilisable en invité. C'est un mode de fonctionnement normal, pas une panne : un ami de
+passage ou un recruteur qui teste ne rencontre aucune étape nouvelle.
+</div>
+
+<h2>Comment tout ça se teste sans réseau</h2>
+
+<p>Aucun test n'appelle Google. On génère une paire de clés, on publie la moitié publique
+dans un JWKS local, et on signe des jetons de test avec la privée. Le token endpoint est
+remplacé par une fonction qui rend ce qu'on veut.</p>
+
+<p>L'intérêt n'est pas la vitesse : c'est que <strong>les cas d'échec deviennent
+provocables</strong>. On ne peut pas demander à Google un jeton expiré, un jeton signé
+avec la mauvaise clé, ou un jeton destiné à une autre application. En local, si :</p>
+
+<pre><code><span class="c">// server/auth.test.ts</span>
+it(<span class="s">"refuse un jeton signe par une autre cle"</span>, <span class="k">async</span> () => {
+  <span class="k">const</span> b = <span class="k">await</span> banc();
+  <span class="k">const</span> response = <span class="k">await</span> connecter(b, (nonce) => idToken({ nonce, key: autreCle }));
+  expect(response.headers.get(<span class="s">"location"</span>)).toBe(<span class="s">"/?auth=failed"</span>);
+  expect((<span class="k">await</span> b.get(<span class="s">"/api/me"</span>)).status).toBe(<span class="n">401</span>);
+});</code></pre>
+
+<h2>Où on en est, et ce que ça débloque</h2>
+
+<p>Le serveur sait maintenant qui tu es sur ses routes HTTP. Trois choses manquent
+encore :</p>
+
+<div class="filecard">
+<h4>U3 — l'identité sur le WebSocket</h4>
+<p>La room passe par une connexion WebSocket, ouverte avant toute requête HTTP. Il faut
+lire le cookie au moment de l'ouverture pour que ton nom de compte remplace le pseudo.</p>
+</div>
+
+<div class="filecard">
+<h4>U4 — le bouton</h4>
+<p>Rien n'est encore visible : pas de bouton de connexion, pas d'écran de compte. Le flow
+marche, personne ne peut le déclencher depuis l'interface.</p>
+</div>
+
+<div class="filecard">
+<h4>U5 et U6 — historique et playlists</h4>
+<p>La raison d'être de tout ça. Le compte n'est pas une fin : c'est ce qui permet à
+quelque chose de survivre à la fermeture d'une room.</p>
+</div>
+
+<footer>
+SyncMusic — explainer écrit le 2026-08-26, après la livraison de U2.
+Code de référence : <code>server/auth.ts</code>. Plan complet :
+<code>docs/plans/2026-08-21-0102-feat-comptes-utilisateurs-plan.md</code>.
+</footer>
+
+</main>
+</body>
+</html>
