@@ -384,3 +384,18 @@ button, input {
   gap: 12px; margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line);
 }
 .account-screen__logout { color: var(--bad); }
+
+/* --- Historique ------------------------------------------------------------ */
+
+/* La barre de compte porte desormais deux liens: un peu d air entre eux. */
+.account-bar__link + .account-bar__link { margin-left: 14px; }
+
+.history__list { list-style: none; margin: 0 0 16px; padding: 0; text-align: left; }
+.history__item {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding: 10px 2px; border-bottom: 1px solid var(--line);
+}
+.history__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history__title--raw { font-family: ui-monospace, Menlo, monospace; font-size: 0.88rem; color: var(--muted); }
+.history__when { color: var(--muted); font-size: 0.84rem; white-space: nowrap; }
+.history > .account-bar__link { display: inline-block; margin-top: 18px; }

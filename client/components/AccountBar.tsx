@@ -28,6 +28,7 @@ export function AccountBar({ account }: Props) {
     <div className="account-bar">
       <span className="account-bar__name">Connecte comme <strong>{account.name}</strong></span>
       <Link className="account-bar__link" to="/compte">Mon compte</Link>
+      <Link className="account-bar__link" to="/historique">Mon historique</Link>
     </div>
   );
 }

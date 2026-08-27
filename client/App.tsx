@@ -13,7 +13,9 @@ import { resolveServerUrl } from "./lib/serverUrl";
 import { readResume, saveResume, clearResume, type ResumeRecord } from "./lib/resume";
 import { RoomJoin } from "./components/RoomJoin";
 import { AccountScreen } from "./components/AccountScreen";
+import { History } from "./components/History";
 import { fetchAccount, logout, saveAccountName, type Account } from "./lib/account";
+import { fetchHistory, type HistoryPage } from "./lib/history";
 import { Queue } from "./components/Queue";
 import { Transport as TransportBar } from "./components/Transport";
 import { SyncBadge } from "./components/SyncBadge";
@@ -49,6 +51,8 @@ export function App() {
    * « invite » evite de faire clignoter le bouton de connexion au chargement.
    */
   const [account, setAccount] = useState<Account | null | undefined>(undefined);
+  /** Page d historique chargee, null tant que /api/history n a pas repondu. */
+  const [history, setHistory] = useState<HistoryPage | null>(null);
   const path = useLocation().pathname;
   const [latencyMs, setLatencyMs] = useState(() => {
     const stored = window.localStorage.getItem("syncmusic.latencyMs");
@@ -194,6 +198,14 @@ export function App() {
     void fetchAccount().then(setAccount);
   }, []);
 
+  // L historique se recharge a chaque visite de l ecran: une ecoute vient peut-etre
+  // de s y ajouter. On repart de null pour ne pas montrer une page perimee.
+  useEffect(() => {
+    if (path !== "/historique") return;
+    setHistory(null);
+    void fetchHistory().then(setHistory);
+  }, [path]);
+
   /*
    * Retour d une connexion qui n a pas abouti (R12): refus du consentement, erreur
    * Google, cookie perime. On le dit une fois puis on nettoie l adresse, sinon le
@@ -325,6 +337,35 @@ export function App() {
    * vit dans cet effet, et une route qui demonterait App ferait sortir de la room le
    * temps d aller regarder son nom.
    */
+  if (path === "/historique") {
+    if (account === undefined) {
+      return (
+        <main className="join">
+          <h1>Mon historique</h1>
+          <p className="join__baseline">Un instant...</p>
+        </main>
+      );
+    }
+    return (
+      <History
+        account={account}
+        page={history}
+        nowMs={now}
+        onMore={() => {
+          const cursor = history?.nextBefore;
+          if (!cursor) return;
+          void fetchHistory(cursor).then((next) => {
+            if (next === null) return;
+            setHistory((previous) => previous === null ? next : {
+              entries: [...previous.entries, ...next.entries],
+              nextBefore: next.nextBefore,
+            });
+          });
+        }}
+      />
+    );
+  }
+
   if (path === "/compte") {
     // Attendre la reponse avant de monter l ecran: il pre-remplit le champ avec le nom.
     if (account === undefined) {
