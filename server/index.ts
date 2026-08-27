@@ -300,11 +300,6 @@ function attachSocket(socket: WebSocket, user: User | null): void {
         }
         return;
       }
-      case "control_seek": {
-        const waiting = room.resumeAt(message.positionMs, now);
-        broadcastState(code, room);
-        return broadcast(code, { type: "waiting", barrierId: waiting.barrierId, positionMs: waiting.positionMs, waitingFor: waiting.waitingFor, sinceServerMs: now });
-      }
       case "ready": {
         const outcome = room.ready(session.participantId, message.barrierId, now);
         if (outcome.kind === "start") {
@@ -315,13 +310,6 @@ function attachSocket(socket: WebSocket, user: User | null): void {
             startAtServerMs: outcome.startAtServerMs,
           });
         }
-        if (outcome.kind === "waiting") {
-          return broadcast(code, { type: "waiting", barrierId: outcome.barrierId, positionMs: outcome.positionMs, waitingFor: outcome.waitingFor, sinceServerMs: now });
-        }
-        return;
-      }
-      case "retract_ready": {
-        const outcome = room.retract(session.participantId, message.barrierId, now);
         if (outcome.kind === "waiting") {
           return broadcast(code, { type: "waiting", barrierId: outcome.barrierId, positionMs: outcome.positionMs, waitingFor: outcome.waitingFor, sinceServerMs: now });
         }

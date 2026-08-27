@@ -58,7 +58,7 @@ describe("messages invalides", () => {
   });
 
   it("rejette une position negative", () => {
-    const result = parseClientMessage({ type: "control_seek", positionMs: -1 });
+    const result = parseClientMessage({ type: "ready", barrierId: 0, positionMs: -1 });
     expect(result.ok).toBe(false);
   });
 

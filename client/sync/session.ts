@@ -142,7 +142,6 @@ export function createSession(deps: SessionDeps) {
       send({
         type: "position_report",
         positionMs: Math.max(0, observation.positionMs),
-        observedAt: nowMs,
         fresh: observation.fresh,
       });
 
@@ -212,10 +211,6 @@ export function createSession(deps: SessionDeps) {
 
     setOutputLatencyMs(value: number): void {
       outputLatencyMs = value;
-    },
-
-    outputLatencyMs(): number {
-      return outputLatencyMs;
     },
 
     driftPoints() {

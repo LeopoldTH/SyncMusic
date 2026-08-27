@@ -49,14 +49,6 @@ describe("identifiant de barriere", () => {
     expect(out.kind).toBe("waiting");
   });
 
-  it("accepte une retractation et retire le participant du quorum", () => {
-    const b = createBarrier(CFG);
-    const opened = b.open({ positionMs: 30_000, atServerMs: 1_000 });
-    b.ready({ barrierId: opened.barrierId, participantId: "a" }, 1_100);
-    b.retract({ barrierId: opened.barrierId, participantId: "a" }, 1_150);
-    const out = b.ready({ barrierId: opened.barrierId, participantId: "b" }, 1_200);
-    expect(out.kind).toBe("waiting");
-  });
 });
 
 describe("cas limites", () => {

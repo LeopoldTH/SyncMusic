@@ -86,12 +86,6 @@ export function createBarrier(config: BarrierConfig) {
       return everyone ? start(atServerMs) : waiting();
     },
 
-    retract(ref: BarrierRef, _atServerMs: number): BarrierOutcome {
-      if (!isCurrent(ref)) return { kind: "ignored" };
-      ready.delete(ref.participantId);
-      return waiting();
-    },
-
     tick(atServerMs: number): BarrierOutcome {
       if (!open || atServerMs < deadlineAtServerMs) return { kind: "ignored" };
       /*

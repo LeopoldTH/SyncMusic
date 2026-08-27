@@ -61,15 +61,9 @@ export const QueueRemove = z.object({
   itemId: z.string().min(1),
 }).strict();
 
-/** play / pause / next / previous. Le saut a sa propre forme, pour eviter un champ optionnel. */
 export const ControlTransport = z.object({
   type: z.literal("control_transport"),
   action: z.enum(["play", "pause", "next", "previous"]),
-}).strict();
-
-export const ControlSeek = z.object({
-  type: z.literal("control_seek"),
-  positionMs: Millis.nonnegative(),
 }).strict();
 
 /** Sonde d'horloge. `clientSentAt` est lu sur l'horloge du client (KTD1). */
@@ -89,12 +83,6 @@ export const Ready = z.object({
   positionMs: Millis.nonnegative(),
 }).strict();
 
-/** Retractation d'une disponibilite deja annoncee: le client a cale avant l'instant de depart. */
-export const RetractReady = z.object({
-  type: z.literal("retract_ready"),
-  barrierId: z.number().int().nonnegative(),
-}).strict();
-
 /** Le client n'avance plus alors qu'il devrait lire (KD6, detection par symptome). */
 export const Stall = z.object({
   type: z.literal("stall"),
@@ -109,7 +97,6 @@ export const Stall = z.object({
 export const PositionReport = z.object({
   type: z.literal("position_report"),
   positionMs: Millis.nonnegative(),
-  observedAt: Millis,
   fresh: z.boolean(),
 }).strict();
 
@@ -123,8 +110,8 @@ export const TrackEnded = z.object({
 }).strict();
 
 export const ClientMessage = z.discriminatedUnion("type", [
-  CreateRoom, JoinRoom, QueueAdd, QueueRemove, ControlTransport, ControlSeek,
-  ClockProbe, Ready, RetractReady, Stall, PositionReport, TrackEnded,
+  CreateRoom, JoinRoom, QueueAdd, QueueRemove, ControlTransport,
+  ClockProbe, Ready, Stall, PositionReport, TrackEnded,
 ]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
 

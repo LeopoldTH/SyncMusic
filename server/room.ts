@@ -270,10 +270,6 @@ export function createRoom(code: string, config: RoomConfig) {
       return positionAt(nowMs);
     },
 
-    retract(participantId: string, barrierId: number, nowMs: number): BarrierOutcome {
-      return barrier.retract({ barrierId, participantId }, nowMs);
-    },
-
     tick(nowMs: number): BarrierOutcome {
       purge(nowMs);
       return noteStart(barrier.tick(nowMs));
