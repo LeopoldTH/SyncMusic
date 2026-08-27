@@ -24,7 +24,16 @@ export function Queue({ items, currentItemId, nameOf, onRemove }: Props) {
         const playing = item.itemId === currentItemId;
         return (
           <li key={item.itemId} className={playing ? "queue__item queue__item--playing" : "queue__item"}>
-            <span className="queue__index" aria-hidden="true">{playing ? "▶" : index + 1}</span>
+            <span className="queue__index" aria-hidden="true">
+              {playing ? (
+                // SVG et pas un glyphe ▶ (charte Console): currentColor suit l accent.
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M5 4 L19 12 L5 20 Z"></path>
+                </svg>
+              ) : (
+                index + 1
+              )}
+            </span>
 
             <span className="queue__text">
               {/* Tant que le titre n est pas revenu, l identifiant tient la place. */}

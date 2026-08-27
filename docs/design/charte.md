@@ -39,7 +39,9 @@ moment du re-skin. La face s'applique via `data-theme="nuit"` sur `<html>`.
   --border: #17161a;    /* le cadre des modules et boutons */
   --shadow: #17161a;    /* l'ombre franche */
   --accent: #ff4d00;    /* action primaire, uniquement */
+  --accent-press: #c93d00; /* accent pressé/survolé */
   --led: #4ef28a;       /* état de sync/connexion, uniquement */
+  --inset-text: #d7d5cf;/* texte posé sur un enfoncement */
   --radius: 0;
 }
 
@@ -53,6 +55,8 @@ moment du re-skin. La face s'applique via `data-theme="nuit"` sur `<html>`.
   --line: #35333b;
   --border: #3a383f;
   --shadow: #060608;
+  --accent-press: #ff7940;
+  --inset-text: #e8e6e0;
 }
 ```
 

@@ -9,7 +9,10 @@ const noop = () => {};
 function rendu(account: Account | null, error: string | null = null): string {
   return renderToStaticMarkup(
     <MemoryRouter>
-      <AccountScreen account={account} onSave={noop} onLogout={noop} error={error} />
+      <AccountScreen
+        account={account} onSave={noop} onLogout={noop} error={error}
+        theme="jour" onTheme={noop}
+      />
     </MemoryRouter>,
   );
 }
@@ -38,5 +41,11 @@ describe("ecran de compte", () => {
 
   it("affiche le refus du serveur", () => {
     expect(rendu({ name: "Leo" }, "nom trop long")).toContain("nom trop long");
+  });
+
+  it("offre le choix de la face a tout le monde, invite compris", () => {
+    // Le theme est une affaire d appareil, pas de compte (charte Console).
+    expect(rendu({ name: "Leo" })).toContain("Nuit");
+    expect(rendu(null)).toContain("Nuit");
   });
 });

@@ -67,6 +67,13 @@ export function App() {
     return stored === null ? 0 : Number(stored);
   });
   /*
+   * La face de la machine (charte Console): jour par defaut, nuit au choix.
+   * Par appareil, comme la latence: le theme est une affaire d ecran, pas de compte.
+   */
+  const [theme, setTheme] = useState<"jour" | "nuit">(() =>
+    window.localStorage.getItem("syncmusic.theme") === "nuit" ? "nuit" : "jour"
+  );
+  /*
    * Reprise apres rafraichissement. Le ref porte la trace tant que la demande est en
    * vol, et vaut donc aussi de drapeau: non-null signifie "on est en train de revenir",
    * ce que `handle` doit savoir sans dependre d un etat qu il ne relit pas.
@@ -244,6 +251,12 @@ export function App() {
     const timer = setInterval(() => setNow(Date.now()), 1_000);
     return () => clearInterval(timer);
   }, []);
+
+  // La face s applique a la racine: les tokens CSS font tout le travail.
+  useEffect(() => {
+    document.documentElement.dataset["theme"] = theme;
+    window.localStorage.setItem("syncmusic.theme", theme);
+  }, [theme]);
 
   const currentVideoId =
     room?.queue.find((q) => q.itemId === room.currentItemId)?.videoId ?? null;
@@ -449,6 +462,8 @@ export function App() {
       <AccountScreen
         account={account}
         error={error}
+        theme={theme}
+        onTheme={setTheme}
         onSave={(name) => {
           void saveAccountName(name).then((result) => {
             if (result.ok) { setAccount({ name: result.name }); setError(null); }
