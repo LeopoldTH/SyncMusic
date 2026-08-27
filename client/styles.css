@@ -403,7 +403,13 @@ button, input {
 /* --- Playlists ------------------------------------------------------------- */
 
 .playlists__create { display: flex; gap: 8px; margin-bottom: 14px; }
-.playlists__create input { flex: 1; min-width: 0; }
+.playlists__create input {
+  flex: 1; min-width: 0;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 9px; padding: 9px 12px;
+}
+.playlists__create input::placeholder { color: #6b7480; }
+.playlists__create input:focus { outline: none; border-color: #3d4552; }
 
 .playlists__list { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 6px; }
 .playlists__pick {
