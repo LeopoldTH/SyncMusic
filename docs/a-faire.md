@@ -4,7 +4,7 @@ Points remontés en usage réel, hors du plan initial.
 
 ## À traiter
 
-- **Interface à soigner.** Mise en page mauvaise sur écran étroit, boutons qui débordent, champ d'ajout qui sort du cadre. À faire une fois toutes les fonctionnalités en place, décision de Léopold.
+- **Interface à soigner.** Mise en page mauvaise sur écran étroit, boutons qui débordent, champ d'ajout qui sort du cadre. La direction est maintenant tranchée : la charte « Console » (`docs/design/charte.md`, décidée le 27/08/2026) fixe tokens, typographie et règles, avec maquettes de tous les écrans. Reste le re-skin de `client/styles.css`, à mener avant ou avec la barre de recherche.
 - **Rejoindre une room déjà commencée.** Un correctif est en place (le serveur tient sa timeline et ouvre un départ commun à l'arrivée, commit `9fe7f8c`) et vérifié à deux fenêtres. À reconfirmer en conditions réelles, sur deux machines.
 - **Décalage audible autour de 200 ms.** Entendu à l'écoute téléphone + ordinateur le 23/08/2026 : l'écart s'entend sur les paroles. C'est déjà un résultat pour la mesure 6 de `docs/mesures-api-youtube.md` — le seuil audible est à 200 ms ou en dessous, alors que le tableau du protocole commençait à 200 ms en pensant que ce serait large.
 
