@@ -1,5 +1,10 @@
-# Integration continue: types, tests. Le plan (U10) la limite volontairement a ces
-# verifications; le deploiement reste un geste manuel via flyctl.
+# Integration continue: types et tests sur chaque push et PR, puis deploiement
+# Fly automatique sur main, seulement si la verification est verte.
+#
+# Le deploy avait ete retire une premiere fois (commit ce6858f): fly launch
+# l avait injecte sans que le secret FLY_API_TOKEN existe, donc il echouait en
+# rouge a chaque push, et sans --ha=false. Le remettre exige les deux:
+# le secret dans GitHub (Settings > Secrets > Actions), et le flag ci-dessous.
 name: CI
 
 on:
@@ -19,3 +24,19 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    # Deux pushes rapproches ne doivent pas deployer en parallele: le second
+    # attend que le premier finisse, et les machines ne se marchent pas dessus.
+    concurrency: fly-deploy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      # --ha=false est obligatoire: les rooms vivent en memoire d UN process
+      # (docs/solutions/workflow-issues/fly-launch-reecrit-la-config.md).
+      - run: flyctl deploy --remote-only --ha=false
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

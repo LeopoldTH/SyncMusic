@@ -56,6 +56,9 @@ L'application exige un processus long, des WebSockets maintenus et HTTPS (le lec
 ```
 fly launch --no-deploy   # reprend fly.toml, choisir le nom d'app
 fly deploy --ha=false    # UNE machine: les rooms vivent en memoire
+
+# Ensuite, chaque merge sur main deploie tout seul (job deploy de la CI),
+# a condition que le secret FLY_API_TOKEN existe dans GitHub Actions.
 ```
 
 Le `--ha=false` n'est pas une option d'économie : avec deux machines, deux participants peuvent atterrir sur deux mémoires différentes et ne jamais se voir. `BASE_URL` dans `fly.toml` doit correspondre à l'adresse publique de l'app : le serveur refuse de démarrer sans elle, et c'est la seule origine dont il accepte les connexions temps réel.
