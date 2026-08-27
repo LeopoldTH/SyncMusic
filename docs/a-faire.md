@@ -11,11 +11,7 @@ Points remontés en usage réel, hors du plan initial.
   Le moteur ne corrige rien à cette valeur, et c'est voulu : le plancher de `client/sync/thresholds.ts` est à 300 ms. Il porte de plus sur l'écart de *chaque client à la timeline du serveur*, pas sur l'écart entre les deux participants — deux clients à 250 ms de la timeline, chacun de son côté, font 500 ms entre eux sans qu'aucun ne bouge. Ce plancher vient de la résolution de mesure (positions reçues toutes les 266 ms) : le baisser, c'est risquer de corriger du bruit. Vrai arbitrage, pas un réglage.
 
   **Avant de toucher au moindre seuil :** la sortie audio d'un téléphone, surtout en Bluetooth, ajoute facilement 100 à 200 ms à elle seule, et le réglage de latence de U9 existe pour ça. Lire l'écart sur la courbe de dérive plutôt que le juger à l'oreille, sinon on retouche le moteur pour compenser un appareil non calibré.
-- **Aucune reconnexion après une coupure réseau.** `client/transport/socket.ts` ouvre une socket au chargement de la page et rien ne la rouvre : l'effet d'`App.tsx` ne tourne qu'une fois. Un hoquet wifi de deux secondes, un téléphone qui met l'écran en veille, et on sort de la room. La musique continue peut-être en local, mais plus rien n'est synchronisé et une pause lancée par l'autre n'arrive jamais.
-
-  Le badge affiche pourtant « Hors ligne — Reconnexion en cours » (`client/components/SyncBadge.tsx`). C'est faux, et c'est le plus gênant : on attend devant une promesse que le code ne tient pas. À corriger dans tous les cas, même sans reconnexion automatique.
-
-  Depuis le correctif du rafraîchissement, un refresh remet dans la room, donc la panne se contourne. Elle n'est pas gérée pour autant.
+- **Reconnexion après une coupure réseau.** Un correctif est en place : `client/transport/socket.ts` rouvre la socket tout seul après une coupure (essais espacés de 1 à 15 s), et `App.tsx` rejoue la reprise de room à chaque réouverture via la trace de sessionStorage — le même chemin que le refresh. Si la coupure a dépassé le délai de grâce et que la room est morte, retour à l'accueil avec la phrase lisible habituelle. Le badge « Hors ligne — Reconnexion en cours » dit désormais la vérité. Couvert par `client/transport/socket.test.ts` ; à reconfirmer en conditions réelles (wifi coupé, téléphone en veille).
 
 ## Vérifié corrigé
 

@@ -119,11 +119,14 @@ export function App() {
          * Une erreur pendant la reprise dit que la room a disparu ou n a plus de place.
          * Ce n est pas une faute de l utilisateur: on efface la trace devenue fausse et
          * on rend l accueil avec une phrase lisible, plutot que le message technique.
+         * Apres une coupure plus longue que le delai de grace, on quitte aussi l ecran
+         * de room: il montrerait une room que le serveur a detruite.
          */
         if (pendingResume.current !== null) {
           pendingResume.current = null;
           clearResume(window.sessionStorage);
           setResuming(false);
+          setRoom(null);
           setError("Ta room precedente n existe plus.");
           return;
         }
@@ -141,12 +144,18 @@ export function App() {
       onOpen: () => {
         setConnected(true);
         /*
-         * On se remet dans sa room sans rien demander. Le serveur garde la place le
-         * temps du delai de grace: y revenir en une seconde, plutot que le temps de
-         * retaper un code, est ce qui rend ce delai suffisant.
+         * On se remet dans sa room sans rien demander, au chargement comme apres une
+         * coupure reseau: le transport rouvre la socket tout seul et rappelle onOpen,
+         * et la trace, reecrite a chaque room_state, dit toujours ou on etait. Le
+         * serveur garde la place le temps du delai de grace: y revenir en une seconde,
+         * plutot que le temps de retaper un code, est ce qui rend ce delai suffisant.
+         * Passer par pendingResume garde le meme chemin d erreur qu au chargement.
          */
-        const pending = pendingResume.current;
-        if (pending) socket.send({ type: "join_room", ...pending });
+        const trace = pendingResume.current ?? readResume(window.sessionStorage);
+        if (trace) {
+          pendingResume.current = trace;
+          socket.send({ type: "join_room", ...trace });
+        }
       },
       onClose: () => setConnected(false),
       onProtocolError: (reason) => setError(`Message du serveur illisible: ${reason}`),
