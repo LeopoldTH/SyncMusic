@@ -291,6 +291,12 @@ function attachSocket(socket: WebSocket, user: User | null): void {
         // Toute reprise passe par un depart commun (R11), sans exception.
         if (message.action === "play" || message.action === "next" || message.action === "previous") {
           /*
+           * Sans morceau courant (un "suivant" en fin de file, une file vide), il n y a
+           * rien a faire partir: ouvrir une barriere relancerait la derniere video
+           * encore chargee dans les lecteurs, pendant que l ecran dit "rien en lecture".
+           */
+          if (room.state().currentItemId === null) return;
+          /*
            * Reprendre la ou on s est arrete. Un changement de morceau repart de zero,
            * une simple lecture reprend a la position figee lors de la pause.
            */
