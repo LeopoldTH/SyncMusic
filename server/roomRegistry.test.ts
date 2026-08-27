@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createRegistry } from "./roomRegistry";
 
-const CFG = { maxParticipants: 2, maxWaitMs: 45_000, leadMs: 500, graceMs: 30_000 };
+const CFG = { maxParticipants: 2, maxWaitMs: 45_000, leadMs: 500, graceMs: 30_000, maxQueue: 100 };
 const T0 = 1_000_000;
 
 describe("attribution des codes", () => {

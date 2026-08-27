@@ -16,7 +16,8 @@ import { z } from "zod";
 const Millis = z.number().finite();
 
 const RoomCode = z.string().regex(/^[A-Z]{4}$/, "code de room: quatre lettres majuscules");
-const VideoId = z.string().regex(/^[\w-]{11}$/, "identifiant de video YouTube: onze caracteres");
+/** Exporte pour la revalidation serveur des routes playlists (U6): meme regle partout. */
+export const VideoId = z.string().regex(/^[\w-]{11}$/, "identifiant de video YouTube: onze caracteres");
 
 /* --- Client vers serveur --------------------------------------------------- */
 
@@ -109,9 +110,19 @@ export const TrackEnded = z.object({
   itemId: z.string().min(1),
 }).strict();
 
+/*
+ * Envoi d une playlist entiere dans la queue (U6, R9). Un seul message: le serveur
+ * lit la playlist du compte de la connexion, jamais un contenu envoye par le client,
+ * et l identifiant ne donne acces qu aux playlists de ce compte.
+ */
+export const SendPlaylist = z.object({
+  type: z.literal("send_playlist"),
+  playlistId: z.number().int().positive(),
+}).strict();
+
 export const ClientMessage = z.discriminatedUnion("type", [
   CreateRoom, JoinRoom, QueueAdd, QueueRemove, ControlTransport,
-  ClockProbe, Ready, Stall, PositionReport, TrackEnded,
+  ClockProbe, Ready, Stall, PositionReport, TrackEnded, SendPlaylist,
 ]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
 
@@ -201,7 +212,10 @@ export const PeerPositions = z.object({
 
 export const ProtocolError = z.object({
   type: z.literal("error"),
-  code: z.enum(["room_not_found", "room_full", "not_in_room", "bad_message", "cannot_remove_playing", "server_full"]),
+  code: z.enum([
+    "room_not_found", "room_full", "not_in_room", "bad_message", "cannot_remove_playing",
+    "server_full", "queue_full", "playlist_not_found",
+  ]),
   message: z.string().min(1),
 }).strict();
 

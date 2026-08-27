@@ -12,9 +12,11 @@ export interface RoomConfig {
   leadMs: number;
   /** Une coupure reseau breve ne doit pas detruire la room et sa file. */
   graceMs: number;
+  /** Plafond de la file (KTD9): une room est de la memoire, une playlist peut etre longue. */
+  maxQueue: number;
 }
 
-export type RoomErrorCode = "room_full" | "not_in_room" | "cannot_remove_playing";
+export type RoomErrorCode = "room_full" | "not_in_room" | "cannot_remove_playing" | "queue_full";
 
 type Failure = { ok: false; code: RoomErrorCode; message: string };
 function fail(code: RoomErrorCode, message: string): Failure {
@@ -152,10 +154,35 @@ export function createRoom(code: string, config: RoomConfig) {
     queueAdd(participantId: string, videoId: string, nowMs: number):
       { ok: true; itemId: string } | Failure {
       if (!presence.has(participantId)) return fail("not_in_room", "participant inconnu dans cette room");
+      if (queue.length >= config.maxQueue) {
+        return fail("queue_full", `la file est pleine (${config.maxQueue} morceaux)`);
+      }
       const itemId = `q${nextItemId++}`;
       queue.push({ itemId, videoId, addedBy: participantId, title: null });
       void nowMs;
       return { ok: true, itemId };
+    },
+
+    /*
+     * Ajout d une playlist entiere (U6, R9). Tout ou rien: refuser au milieu laisserait
+     * une demi-playlist dans la file, pire que refuser franchement. Les titres deja
+     * connus arrivent avec les morceaux, il n y a rien a aller rechercher.
+     */
+    queueAddAll(
+      participantId: string,
+      items: Array<{ videoId: string; title: string | null }>,
+      nowMs: number,
+    ): { ok: true } | Failure {
+      if (!presence.has(participantId)) return fail("not_in_room", "participant inconnu dans cette room");
+      if (queue.length + items.length > config.maxQueue) {
+        return fail("queue_full",
+          `cette playlist depasserait le plafond de ${config.maxQueue} morceaux de la file`);
+      }
+      for (const item of items) {
+        queue.push({ itemId: `q${nextItemId++}`, videoId: item.videoId, addedBy: participantId, title: item.title });
+      }
+      void nowMs;
+      return { ok: true };
     },
 
     queueRemove(participantId: string, itemId: string, nowMs: number): { ok: true } | Failure {

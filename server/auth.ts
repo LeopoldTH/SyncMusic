@@ -156,14 +156,14 @@ function redirect(response: ServerResponse, location: string): void {
  * posent un header `Origin` sur tout POST; `Sec-Fetch-Site` sert de second temoin.
  * Un client sans ni l un ni l autre (curl) est refuse: c est le comportement voulu.
  */
-function sameOrigin(request: IncomingMessage, config: AuthConfig): boolean {
+export function sameOrigin(request: IncomingMessage, config: AuthConfig): boolean {
   const origin = request.headers.origin;
   if (origin !== undefined) return origin === config.origin;
   return request.headers["sec-fetch-site"] === "same-origin";
 }
 
 /** Rend null au-dela du plafond: un corps sans borne est de la memoire offerte (KTD9). */
-async function readBody(request: IncomingMessage, maxBytes: number): Promise<string | null> {
+export async function readBody(request: IncomingMessage, maxBytes: number): Promise<string | null> {
   let size = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of request) {

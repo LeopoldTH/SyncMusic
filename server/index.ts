@@ -9,12 +9,13 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
-import { parseClientMessage, PSEUDO_MAX_CHARS, type ServerMessage } from "../shared/protocol";
+import { z } from "zod";
+import { parseClientMessage, PSEUDO_MAX_CHARS, VideoId, type ServerMessage } from "../shared/protocol";
 import { createRegistry, type Room } from "./roomRegistry";
 import { fetchVideoTitle } from "./videoTitle";
 import { createStaticHandler } from "./static";
-import { openDatabase, resolveDbPath, type HistoryCursor, type User } from "./db";
-import { createAuth, readAuthConfig, sendJson } from "./auth";
+import { LIMITS, openDatabase, resolveDbPath, type HistoryCursor, type User } from "./db";
+import { createAuth, readAuthConfig, readBody, sameOrigin, sendJson } from "./auth";
 import { recordCommonStart } from "./history";
 
 const PORT = Number(process.env["PORT"] ?? 8787);
@@ -24,6 +25,8 @@ const CONFIG = {
   maxWaitMs: 45_000,
   leadMs: 500,
   graceMs: 30_000,
+  /** Plafond de la file (KTD9): une playlist envoyee ne peut pas le depasser. */
+  maxQueue: 100,
 };
 
 /** Cadence de rediffusion des positions: celle de la boucle client (mesure du 19/08). */
@@ -139,7 +142,7 @@ const auth = createAuth({ config: authConfig, db });
 const http = createServer((request, response) => {
   void (async () => {
     try {
-      if (handleHistory(request, response)) return;
+      if (await handleApi(request, response)) return;
       if (await auth.handle(request, response)) return;
       await serveStatic(request, response);
     } catch (error) {
@@ -184,33 +187,124 @@ function parseHistoryCursor(raw: string | null): HistoryCursor | undefined {
   return { playedAt: Number(match[1]), id: Number(match[2]) };
 }
 
-/*
- * L historique passe par HTTP, pas par le WebSocket (KTD8): il est lie au compte, via
- * le cookie, pas a une room. La route vit ici et non dans auth.ts, qui ne connait que
- * la connexion; elle passe avant lui parce que son routeur repond 404 a tout /api/*
- * qu il ne reconnait pas.
- */
-function handleHistory(request: IncomingMessage, response: ServerResponse): boolean {
-  const url = new URL(request.url ?? "/", authConfig.origin);
-  if (url.pathname !== "/api/history" || (request.method ?? "GET") !== "GET") return false;
+const PlaylistBody = z.object({
+  name: z.string().trim().min(1, "choisis un nom de playlist")
+    .max(LIMITS.playlistNameChars, "nom de playlist trop long"),
+}).strict();
 
+const PlaylistItemBody = z.object({
+  videoId: VideoId,
+  /** Present quand l ajout vient de l historique, qui connait deja le titre. */
+  title: z.string().max(LIMITS.titleChars).nullable().default(null),
+}).strict();
+
+/** Corps JSON borne et valide (KTD9). Repond lui-meme au refus, et rend alors null. */
+async function readJson<T>(
+  request: IncomingMessage, response: ServerResponse, schema: z.ZodType<T>,
+): Promise<T | null> {
+  const body = await readBody(request, MAX_PAYLOAD_BYTES);
+  if (body === null) {
+    sendJson(response, 413, { error: "corps trop volumineux" });
+    return null;
+  }
+  let payload: unknown;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    sendJson(response, 400, { error: "corps illisible" });
+    return null;
+  }
+  const parsed = schema.safeParse(payload);
+  if (parsed.success) return parsed.data;
+  sendJson(response, 400, { error: parsed.error.issues[0]?.message ?? "corps invalide" });
+  return null;
+}
+
+/*
+ * Historique et playlists passent par HTTP, pas par le WebSocket (KTD8): ils sont lies
+ * au compte, via le cookie, pas a une room. Les routes vivent ici et non dans auth.ts,
+ * qui ne connait que la connexion; elles passent avant lui parce que son routeur
+ * repond 404 a tout /api/* qu il ne reconnait pas.
+ */
+async function handleApi(request: IncomingMessage, response: ServerResponse): Promise<boolean> {
+  const url = new URL(request.url ?? "/", authConfig.origin);
+  const path = url.pathname;
+  const method = request.method ?? "GET";
+  /* Les identifiants de playlist sont sequentiels, donc enumerables: chaque route
+     scope sa requete par (id, compte) et repond 404 pour la playlist d un autre. */
+  const itemsPath = /^\/api\/playlists\/(\d{1,9})\/items$/.exec(path);
+  if (path !== "/api/history" && path !== "/api/playlists" && itemsPath === null) return false;
+
+  // Meme regle que le routeur d auth: un POST venu d un autre site ne declenche rien.
+  if (method === "POST" && !sameOrigin(request, authConfig)) {
+    sendJson(response, 403, { error: "origine refusee" });
+    return true;
+  }
   const session = auth.sessionFromCookies(request.headers.cookie);
   if (session === null) {
     sendJson(response, 401, { error: "connexion requise" });
     return true;
   }
-  /*
-   * Pagination par curseur plutot que par offset: l historique grandit par le haut,
-   * et un offset glisserait d une page a l autre a chaque nouvelle ecoute.
-   */
-  const entries = db.listHistory(
-    session.user.id, HISTORY_PAGE, parseHistoryCursor(url.searchParams.get("before")),
-  );
-  const last = entries[entries.length - 1];
-  sendJson(response, 200, {
-    entries: entries.map((e) => ({ videoId: e.videoId, title: e.title, playedAt: e.playedAt })),
-    nextBefore: entries.length === HISTORY_PAGE && last ? `${last.playedAt}.${last.id}` : null,
-  });
+  const user = session.user;
+
+  if (path === "/api/history" && method === "GET") {
+    /*
+     * Pagination par curseur plutot que par offset: l historique grandit par le haut,
+     * et un offset glisserait d une page a l autre a chaque nouvelle ecoute.
+     */
+    const entries = db.listHistory(
+      user.id, HISTORY_PAGE, parseHistoryCursor(url.searchParams.get("before")),
+    );
+    const last = entries[entries.length - 1];
+    sendJson(response, 200, {
+      entries: entries.map((e) => ({ videoId: e.videoId, title: e.title, playedAt: e.playedAt })),
+      nextBefore: entries.length === HISTORY_PAGE && last ? `${last.playedAt}.${last.id}` : null,
+    });
+    return true;
+  }
+
+  if (path === "/api/playlists" && method === "GET") {
+    sendJson(response, 200, { playlists: db.listPlaylists(user.id) });
+    return true;
+  }
+
+  if (path === "/api/playlists" && method === "POST") {
+    const body = await readJson(request, response, PlaylistBody);
+    if (body === null) return true;
+    const created = db.createPlaylist(user.id, body.name, Date.now());
+    if (!created.ok) {
+      sendJson(response, 400, { error: created.message });
+      return true;
+    }
+    sendJson(response, 200, { id: created.id, name: body.name });
+    return true;
+  }
+
+  if (itemsPath !== null && method === "GET") {
+    const items = db.getPlaylistItems(Number(itemsPath[1]), user.id);
+    if (items === null) {
+      sendJson(response, 404, { error: "aucune playlist de ce compte ne porte cet identifiant" });
+      return true;
+    }
+    sendJson(response, 200, { items });
+    return true;
+  }
+
+  if (itemsPath !== null && method === "POST") {
+    const body = await readJson(request, response, PlaylistItemBody);
+    if (body === null) return true;
+    const added = db.addPlaylistItem(
+      Number(itemsPath[1]), user.id, { videoId: body.videoId, title: body.title ?? null }, Date.now(),
+    );
+    if (!added.ok) {
+      sendJson(response, added.code === "playlist_not_found" ? 404 : 400, { error: added.message });
+      return true;
+    }
+    sendJson(response, 200, { position: added.position });
+    return true;
+  }
+
+  sendJson(response, 404, { error: "route inconnue" });
   return true;
 }
 
@@ -362,6 +456,28 @@ function attachSocket(socket: WebSocket, user: User | null): void {
       case "queue_remove": {
         const removed = room.queueRemove(session.participantId, message.itemId, now);
         if (!removed.ok) return fail(socket, removed.code, removed.message);
+        return broadcastState(code, room);
+      }
+      case "send_playlist": {
+        /*
+         * L identite du socket decide (KTD5): un invite n a pas de playlist, et un
+         * identifiant devine ne donne acces qu aux playlists de son propre compte.
+         * La meme reponse couvre les deux cas: pas d oracle sur celles des autres.
+         */
+        const items = session.user === null
+          ? null
+          : db.getPlaylistItems(message.playlistId, session.user.id);
+        if (items === null) {
+          return fail(socket, "playlist_not_found", "aucune playlist de ton compte ne porte cet identifiant");
+        }
+        if (items.length === 0) return; // rien a envoyer: la file ne change pas
+        const sent = room.queueAddAll(
+          session.participantId,
+          items.map((i) => ({ videoId: i.videoId, title: i.title })),
+          now,
+        );
+        if (!sent.ok) return fail(socket, sent.code, sent.message);
+        // Comportement d ajouts ordinaires (R9): la file grandit, rien ne demarre.
         return broadcastState(code, room);
       }
       case "control_transport": {

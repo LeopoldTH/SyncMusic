@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createRoom } from "./room";
 
-const CFG = { maxParticipants: 2, maxWaitMs: 45_000, leadMs: 500, graceMs: 30_000 };
+const CFG = { maxParticipants: 2, maxWaitMs: 45_000, leadMs: 500, graceMs: 30_000, maxQueue: 100 };
 const T0 = 1_000_000;
 
 function roomWithTwo() {
@@ -139,6 +139,63 @@ describe("file de lecture", () => {
     room.control("next", T0 + 20);
     expect(room.state().playing).toBe(false);
     expect(room.state().currentItemId).toBe(null);
+  });
+
+  it("refuse un ajout quand la file est pleine (KTD9)", () => {
+    const room = createRoom("ABCD", { ...CFG, maxQueue: 2 });
+    room.join("leo", T0);
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    room.queueAdd("leo", "dQw4w9WgXcQ", T0);
+    const third = room.queueAdd("leo", "aaaaaaaaaaa", T0);
+    expect(third.ok).toBe(false);
+    if (!third.ok) expect(third.code).toBe("queue_full");
+    expect(room.state().queue).toHaveLength(2);
+  });
+});
+
+describe("envoi de playlist (U6)", () => {
+  const items = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ videoId: `videoid${String(i).padStart(4, "0")}`, title: `Titre ${i}` }));
+
+  it("ajoute la playlist a la suite sans toucher au morceau en cours (AE3)", () => {
+    const room = roomWithTwo();
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    room.queueAdd("pote", "dQw4w9WgXcQ", T0);
+    room.control("play", T0 + 10);
+    const before = room.state().currentItemId;
+
+    expect(room.queueAddAll("leo", items(5), T0 + 20).ok).toBe(true);
+    expect(room.state().queue).toHaveLength(7);
+    expect(room.state().currentItemId).toBe(before);
+    // Les titres connus arrivent avec les morceaux, sans second fetch.
+    expect(room.state().queue[2]?.title).toBe("Titre 0");
+  });
+
+  it("remplit une room a l arret sans rien demarrer", () => {
+    const room = roomWithTwo();
+    room.queueAddAll("leo", items(3), T0);
+    expect(room.state().queue).toHaveLength(3);
+    expect(room.state().playing).toBe(false);
+    expect(room.state().currentItemId).toBe(null);
+  });
+
+  it("refuse en bloc une playlist qui depasserait le plafond, file inchangee (KTD9)", () => {
+    const room = createRoom("ABCD", { ...CFG, maxQueue: 4 });
+    room.join("leo", T0);
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+
+    const sent = room.queueAddAll("leo", items(4), T0 + 10);
+    expect(sent.ok).toBe(false);
+    if (!sent.ok) expect(sent.code).toBe("queue_full");
+    // Tout ou rien: pas de demi-playlist dans la file.
+    expect(room.state().queue).toHaveLength(1);
+  });
+
+  it("refuse un participant inconnu", () => {
+    const room = roomWithTwo();
+    const sent = room.queueAddAll("intrus", items(1), T0);
+    expect(sent.ok).toBe(false);
+    if (!sent.ok) expect(sent.code).toBe("not_in_room");
   });
 });
 

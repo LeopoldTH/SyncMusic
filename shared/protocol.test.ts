@@ -62,6 +62,12 @@ describe("messages invalides", () => {
     expect(result.ok).toBe(false);
   });
 
+  it("accepte un envoi de playlist et rejette un identifiant douteux", () => {
+    expect(parseClientMessage({ type: "send_playlist", playlistId: 3 }).ok).toBe(true);
+    expect(parseClientMessage({ type: "send_playlist", playlistId: 0 }).ok).toBe(false);
+    expect(parseClientMessage({ type: "send_playlist", playlistId: "3" }).ok).toBe(false);
+  });
+
   it("rejette un code de room mal forme", () => {
     const result = parseClientMessage({ type: "join_room", code: "ab1" });
     expect(result.ok).toBe(false);
