@@ -57,7 +57,14 @@ moment du re-skin. La face s'applique via `data-theme="nuit"` sur `<html>`.
 ```
 
 `--accent` et `--led` ne changent pas de face : l'orange et la LED verte sont
-l'identité, le châssis n'est que le support.
+l'identité, le châssis n'est que le support. Seul l'état pressé/survolé de
+l'accent varie : `#c93d00` en jour, `#ff7940` en nuit — aucune autre couleur
+dérivée n'est permise.
+
+Deux exceptions au style, volontaires : un identifiant technique (id YouTube)
+garde sa casse d'origine même dans un contexte en majuscules, et le contenu de
+l'enfoncement écran peut utiliser des gris intermédiaires entre `--inset` et
+`--muted` pour ses éléments fantômes.
 
 ## Typographie
 
