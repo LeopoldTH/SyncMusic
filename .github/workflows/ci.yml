@@ -16,8 +16,8 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -33,7 +33,7 @@ jobs:
     # attend que le premier finisse, et les machines ne se marchent pas dessus.
     concurrency: fly-deploy
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: superfly/flyctl-actions/setup-flyctl@master
       # --ha=false est obligatoire: les rooms vivent en memoire d UN process
       # (docs/solutions/workflow-issues/fly-launch-reecrit-la-config.md).
