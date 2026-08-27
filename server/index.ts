@@ -211,6 +211,14 @@ function attachSocket(socket: WebSocket, user: User | null): void {
     }
 
     if (message.type === "create_room") {
+      /*
+       * Le plafond se verifie avant d allouer quoi que ce soit. Le sweep ne detruit
+       * que les rooms que plus personne ne peut rejoindre: sans cette porte, creer
+       * des rooms en boucle suffit a faire gonfler la memoire jusqu a la panne.
+       */
+      if (registry.size() >= MAX_ROOMS) {
+        return fail(socket, "server_full", "le serveur est plein, reessaie dans un moment");
+      }
       const { code, room } = registry.create(now);
       room.join(session.participantId, now, nameFor(session, message.name));
       session.code = code;

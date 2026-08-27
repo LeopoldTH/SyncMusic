@@ -201,7 +201,7 @@ export const PeerPositions = z.object({
 
 export const ProtocolError = z.object({
   type: z.literal("error"),
-  code: z.enum(["room_not_found", "room_full", "not_in_room", "bad_message", "cannot_remove_playing"]),
+  code: z.enum(["room_not_found", "room_full", "not_in_room", "bad_message", "cannot_remove_playing", "server_full"]),
   message: z.string().min(1),
 }).strict();
 
