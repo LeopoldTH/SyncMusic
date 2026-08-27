@@ -5,7 +5,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -13,8 +13,9 @@ import { parseClientMessage, PSEUDO_MAX_CHARS, type ServerMessage } from "../sha
 import { createRegistry, type Room } from "./roomRegistry";
 import { fetchVideoTitle } from "./videoTitle";
 import { createStaticHandler } from "./static";
-import { openDatabase, resolveDbPath, type User } from "./db";
-import { createAuth, readAuthConfig } from "./auth";
+import { openDatabase, resolveDbPath, type HistoryCursor, type User } from "./db";
+import { createAuth, readAuthConfig, sendJson } from "./auth";
+import { recordCommonStart } from "./history";
 
 const PORT = Number(process.env["PORT"] ?? 8787);
 
@@ -138,6 +139,7 @@ const auth = createAuth({ config: authConfig, db });
 const http = createServer((request, response) => {
   void (async () => {
     try {
+      if (handleHistory(request, response)) return;
       if (await auth.handle(request, response)) return;
       await serveStatic(request, response);
     } catch (error) {
@@ -170,6 +172,75 @@ http.on("upgrade", (request, socket, head) => {
   }
   wss.handleUpgrade(request, socket, head, (ws) => attachSocket(ws, verdict.user));
 });
+
+/** Taille de page de l historique: assez pour un ecran, bornee pour la reponse. */
+const HISTORY_PAGE = 50;
+
+/** Curseur `avant` de la pagination: `playedAt.id` de la derniere entree affichee. */
+function parseHistoryCursor(raw: string | null): HistoryCursor | undefined {
+  if (raw === null) return undefined;
+  const match = /^(\d{1,15})\.(\d{1,15})$/.exec(raw);
+  if (!match) return undefined;
+  return { playedAt: Number(match[1]), id: Number(match[2]) };
+}
+
+/*
+ * L historique passe par HTTP, pas par le WebSocket (KTD8): il est lie au compte, via
+ * le cookie, pas a une room. La route vit ici et non dans auth.ts, qui ne connait que
+ * la connexion; elle passe avant lui parce que son routeur repond 404 a tout /api/*
+ * qu il ne reconnait pas.
+ */
+function handleHistory(request: IncomingMessage, response: ServerResponse): boolean {
+  const url = new URL(request.url ?? "/", authConfig.origin);
+  if (url.pathname !== "/api/history" || (request.method ?? "GET") !== "GET") return false;
+
+  const session = auth.sessionFromCookies(request.headers.cookie);
+  if (session === null) {
+    sendJson(response, 401, { error: "connexion requise" });
+    return true;
+  }
+  /*
+   * Pagination par curseur plutot que par offset: l historique grandit par le haut,
+   * et un offset glisserait d une page a l autre a chaque nouvelle ecoute.
+   */
+  const entries = db.listHistory(
+    session.user.id, HISTORY_PAGE, parseHistoryCursor(url.searchParams.get("before")),
+  );
+  const last = entries[entries.length - 1];
+  sendJson(response, 200, {
+    entries: entries.map((e) => ({ videoId: e.videoId, title: e.title, playedAt: e.playedAt })),
+    nextBefore: entries.length === HISTORY_PAGE && last ? `${last.playedAt}.${last.id}` : null,
+  });
+  return true;
+}
+
+/*
+ * Un depart commun se diffuse et s inscrit a l historique au meme endroit (U5, KTD6):
+ * c est le seul instant ou le serveur sait a la fois quel morceau part et qui est la
+ * pour l entendre. Le handler `ready` et la boucle de tick passent tous deux par ici.
+ */
+function broadcastStart(
+  code: string,
+  room: Room,
+  outcome: { barrierId: number; positionMs: number; startAtServerMs: number },
+  nowMs: number,
+): void {
+  broadcast(code, {
+    type: "common_start",
+    barrierId: outcome.barrierId,
+    positionMs: outcome.positionMs,
+    startAtServerMs: outcome.startAtServerMs,
+  });
+  const instanceId = registry.instanceOf(code);
+  if (instanceId === undefined) return;
+  recordCommonStart({
+    db,
+    instanceId,
+    snapshot: room.state(),
+    users: membersOf(code).map(([, s]) => s.user),
+    nowMs,
+  });
+}
 
 function attachSocket(socket: WebSocket, user: User | null): void {
   sessions.set(socket, { participantId: newParticipantId(), code: null, user });
@@ -317,12 +388,7 @@ function attachSocket(socket: WebSocket, user: User | null): void {
       case "ready": {
         const outcome = room.ready(session.participantId, message.barrierId, now);
         if (outcome.kind === "start") {
-          return broadcast(code, {
-            type: "common_start",
-            barrierId: outcome.barrierId,
-            positionMs: outcome.positionMs,
-            startAtServerMs: outcome.startAtServerMs,
-          });
+          return broadcastStart(code, room, outcome, now);
         }
         if (outcome.kind === "waiting") {
           return broadcast(code, { type: "waiting", barrierId: outcome.barrierId, positionMs: outcome.positionMs, waitingFor: outcome.waitingFor, sinceServerMs: now });
@@ -362,14 +428,7 @@ setInterval(() => {
     const room = registry.get(code);
     if (!room) continue;
     const outcome = room.tick(now);
-    if (outcome.kind === "start") {
-      broadcast(code, {
-        type: "common_start",
-        barrierId: outcome.barrierId,
-        positionMs: outcome.positionMs,
-        startAtServerMs: outcome.startAtServerMs,
-      });
-    }
+    if (outcome.kind === "start") broadcastStart(code, room, outcome, now);
     broadcast(code, { type: "peer_positions", ...room.peerPositions(now) });
   }
 }, BROADCAST_MS);

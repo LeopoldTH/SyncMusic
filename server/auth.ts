@@ -136,7 +136,7 @@ function randomToken(): string {
   return randomBytes(16).toString("base64url");
 }
 
-function sendJson(response: ServerResponse, status: number, payload: unknown): void {
+export function sendJson(response: ServerResponse, status: number, payload: unknown): void {
   const body = JSON.stringify(payload);
   response.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",

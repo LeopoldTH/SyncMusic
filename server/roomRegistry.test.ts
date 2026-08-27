@@ -57,3 +57,22 @@ describe("recherche et destruction", () => {
     expect(reg.sweep(T0 + CFG.graceMs + 1)).toContain(code);
   });
 });
+
+describe("instance de room (KTD6)", () => {
+  it("donne une instance a chaque room, et rien pour un code inconnu", () => {
+    const reg = createRegistry(CFG);
+    const { code } = reg.create(T0);
+    expect(reg.instanceOf(code)).toBeDefined();
+    expect(reg.instanceOf("ZZZZ")).toBeUndefined();
+  });
+
+  it("un code recycle porte une nouvelle instance: les cles d historique ne se croisent jamais", () => {
+    // Meme code a chaque tirage: la seconde room reprend le code de la premiere.
+    const reg = createRegistry(CFG, () => "AAAA");
+    const first = reg.instanceOf(reg.create(T0).code);
+    reg.sweep(T0 + CFG.graceMs + 1);
+    const second = reg.instanceOf(reg.create(T0).code);
+    expect(second).toBeDefined();
+    expect(second).not.toBe(first);
+  });
+});
