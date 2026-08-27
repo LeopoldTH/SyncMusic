@@ -399,3 +399,32 @@ button, input {
 .history__title--raw { font-family: ui-monospace, Menlo, monospace; font-size: 0.88rem; color: var(--muted); }
 .history__when { color: var(--muted); font-size: 0.84rem; white-space: nowrap; }
 .history > .account-bar__link { display: inline-block; margin-top: 18px; }
+
+/* --- Playlists ------------------------------------------------------------- */
+
+.playlists__create { display: flex; gap: 8px; margin-bottom: 14px; }
+.playlists__create input { flex: 1; min-width: 0; }
+
+.playlists__list { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 6px; }
+.playlists__pick {
+  width: 100%; display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 9px 12px; color: var(--text); cursor: pointer; text-align: left;
+}
+.playlists__pick:hover { border-color: var(--accent); }
+.playlists__pick--active { border-color: var(--accent); background: var(--panel-high, var(--panel)); }
+.playlists__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.playlists__count { color: var(--muted); font-size: 0.84rem; white-space: nowrap; }
+
+.playlists__detail { text-align: left; margin-top: 6px; }
+.playlists__detail h2 { font-size: 1.02rem; margin: 12px 0 6px; }
+.playlists__detail .add { margin: 10px 0; }
+.playlists__recent h3 { font-size: 0.92rem; color: var(--muted); margin: 16px 0 4px; }
+.playlists__add { padding: 3px 10px; font-size: 0.82rem; }
+
+.send-playlist { display: flex; gap: 8px; margin-bottom: 10px; }
+.send-playlist select {
+  flex: 1; min-width: 0; background: var(--panel); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+}
+.send-playlist__none { margin-bottom: 10px; }

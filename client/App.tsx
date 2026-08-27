@@ -14,8 +14,13 @@ import { readResume, saveResume, clearResume, type ResumeRecord } from "./lib/re
 import { RoomJoin } from "./components/RoomJoin";
 import { AccountScreen } from "./components/AccountScreen";
 import { History } from "./components/History";
+import { Playlists, SendPlaylist } from "./components/Playlists";
 import { fetchAccount, logout, saveAccountName, type Account } from "./lib/account";
 import { fetchHistory, type HistoryPage } from "./lib/history";
+import {
+  addPlaylistItem, createPlaylist, fetchPlaylistItems, fetchPlaylists,
+  type Playlist, type PlaylistItem,
+} from "./lib/playlists";
 import { Queue } from "./components/Queue";
 import { Transport as TransportBar } from "./components/Transport";
 import { SyncBadge } from "./components/SyncBadge";
@@ -53,6 +58,9 @@ export function App() {
   const [account, setAccount] = useState<Account | null | undefined>(undefined);
   /** Page d historique chargee, null tant que /api/history n a pas repondu. */
   const [history, setHistory] = useState<HistoryPage | null>(null);
+  const [playlists, setPlaylists] = useState<Playlist[] | null>(null);
+  const [selectedPlaylist, setSelectedPlaylist] = useState<number | null>(null);
+  const [playlistItems, setPlaylistItems] = useState<PlaylistItem[] | null>(null);
   const path = useLocation().pathname;
   const [latencyMs, setLatencyMs] = useState(() => {
     const stored = window.localStorage.getItem("syncmusic.latencyMs");
@@ -199,12 +207,26 @@ export function App() {
   }, []);
 
   // L historique se recharge a chaque visite de l ecran: une ecoute vient peut-etre
-  // de s y ajouter. On repart de null pour ne pas montrer une page perimee.
+  // de s y ajouter. L ecran playlists le lit aussi, comme source d ajout (R8).
   useEffect(() => {
-    if (path !== "/historique") return;
+    if (path !== "/historique" && path !== "/playlists") return;
     setHistory(null);
     void fetchHistory().then(setHistory);
   }, [path]);
+
+  // Les playlists servent deux ecrans: le leur, et la room pour l envoi (R9).
+  const inRoom = room !== null;
+  useEffect(() => {
+    if (!account) return;
+    if (path !== "/playlists" && !inRoom) return;
+    void fetchPlaylists().then(setPlaylists);
+  }, [path, account, inRoom]);
+
+  useEffect(() => {
+    if (selectedPlaylist === null) return;
+    setPlaylistItems(null);
+    void fetchPlaylistItems(selectedPlaylist).then(setPlaylistItems);
+  }, [selectedPlaylist]);
 
   /*
    * Retour d une connexion qui n a pas abouti (R12): refus du consentement, erreur
@@ -337,6 +359,53 @@ export function App() {
    * vit dans cet effet, et une route qui demonterait App ferait sortir de la room le
    * temps d aller regarder son nom.
    */
+  if (path === "/playlists") {
+    if (account === undefined) {
+      return (
+        <main className="join">
+          <h1>Mes playlists</h1>
+          <p className="join__baseline">Un instant...</p>
+        </main>
+      );
+    }
+    const refreshPlaylists = () => void fetchPlaylists().then(setPlaylists);
+    const addToSelected = (item: { videoId: string; title: string | null }) => {
+      const target = selectedPlaylist;
+      if (target === null) return;
+      void addPlaylistItem(target, item).then((result) => {
+        if (!result.ok) return setError(result.reason);
+        setError(null);
+        void fetchPlaylistItems(target).then(setPlaylistItems);
+        refreshPlaylists(); // le compteur de morceaux a change
+      });
+    };
+    return (
+      <Playlists
+        account={account}
+        playlists={playlists}
+        selectedId={selectedPlaylist}
+        items={playlistItems}
+        recent={history?.entries ?? null}
+        error={error}
+        onSelect={setSelectedPlaylist}
+        onCreate={(name) => {
+          void createPlaylist(name).then((result) => {
+            if (!result.ok) return setError(result.reason);
+            setError(null);
+            setSelectedPlaylist(result.value.id);
+            refreshPlaylists();
+          });
+        }}
+        onAddLink={(rawLink) => {
+          const parsed = parseVideoId(rawLink);
+          if (!parsed.ok) return setError(parsed.reason);
+          addToSelected({ videoId: parsed.videoId, title: null });
+        }}
+        onAddEntry={(entry) => addToSelected({ videoId: entry.videoId, title: entry.title })}
+      />
+    );
+  }
+
   if (path === "/historique") {
     if (account === undefined) {
       return (
@@ -520,6 +589,14 @@ export function App() {
           />
           <button type="submit" className="btn">Ajouter</button>
         </form>
+
+        {/* L envoi d une playlist se comporte comme des ajouts ordinaires (R9). */}
+        {account ? (
+          <SendPlaylist
+            playlists={playlists}
+            onSend={(playlistId) => send?.({ type: "send_playlist", playlistId })}
+          />
+        ) : null}
 
         {error === null ? null : <p className="error">{error}</p>}
 
