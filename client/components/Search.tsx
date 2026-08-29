@@ -23,6 +23,12 @@ export function Search({ onPick, actionLabel }: Props) {
   const [query, setQuery] = useState("");
   const [state, setState] = useState<State>({ kind: "vide" });
   /*
+   * Les resultats se replient. Dix lignes poussent la file hors de l ecran, et une
+   * fois le morceau ajoute elles n ont plus rien a dire. Replie plutot qu efface: le
+   * compte reste affiche et on les rouvre sans repayer une recherche.
+   */
+  const [folded, setFolded] = useState(false);
+  /*
    * Numero de la derniere recherche lancee. Deux recherches rapides peuvent revenir
    * dans le desordre, et sans ce jeton les resultats de la premiere ecraseraient ceux
    * de la seconde: on afficherait la reponse a une question qu on ne pose plus.
@@ -33,6 +39,8 @@ export function Search({ onPick, actionLabel }: Props) {
     const cleaned = query.trim();
     if (cleaned.length === 0) return;
     const ticket = ++latest.current;
+    // Une nouvelle recherche rouvre la liste: on vient de la demander.
+    setFolded(false);
     setState({ kind: "cherche" });
     void searchVideos(cleaned).then((outcome) => {
       if (ticket !== latest.current) return;
@@ -71,6 +79,22 @@ export function Search({ onPick, actionLabel }: Props) {
       ) : null}
 
       {state.kind === "resultats" && state.results.length > 0 ? (
+        <div className="results__bar">
+          <span className="results__count">
+            {state.results.length} resultats pour « {state.query} »
+          </span>
+          <button
+            type="button"
+            className="results__fold"
+            onClick={() => setFolded((was) => !was)}
+            aria-expanded={!folded}
+          >
+            {folded ? "Afficher" : "Masquer"}
+          </button>
+        </div>
+      ) : null}
+
+      {state.kind === "resultats" && state.results.length > 0 && !folded ? (
         <ul className="results">
           {state.results.map((result) => (
             <li key={result.videoId} className="results__item">
