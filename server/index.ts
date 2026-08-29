@@ -191,13 +191,17 @@ const SEARCH_QUERY_MAX_CHARS = 100;
 /*
  * Le plafond du jour reste sous les 100 recherches quotidiennes de l API: on veut
  * s arreter nous-memes, avec une phrase lisible, plutot que de decouvrir le mur sur
- * un 403 de Google. Le plafond par client laisse de quoi chercher une soiree entiere
- * sans permettre de vider la journee de tout le monde.
+ * un 403 de Google.
+ *
+ * Le plafond par client vise le script, pas le curieux. Construire une file pour une
+ * soiree demande facilement quinze ou vingt recherches d affilee, et buter dessus a ce
+ * moment-la est une frustration pure: la vraie protection vient du plafond quotidien,
+ * que celui-ci ne fait que repartir. D ou une valeur large.
  */
 const searchBudget = createSearchBudget({
   dailyBudget: 90,
   perClientWindowMs: 10 * 60_000,
-  perClientMax: 20,
+  perClientMax: 40,
 });
 
 /*
