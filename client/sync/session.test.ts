@@ -193,6 +193,61 @@ describe("lecteur arrete a l insu de l application", () => {
   });
 });
 
+/*
+ * Le cas nominal du telephone, pas une panne: aucun navigateur mobile n autorise une
+ * machine distante a lancer du son chez toi. Celui qui n a pas appuye sur Lecture doit
+ * faire son propre geste, donc l interface doit savoir le lui demander.
+ */
+describe("lecture bloquee, a debloquer par un geste", () => {
+  it("ne crie pas au blocage pendant un chargement", () => {
+    const obs: PlayerObservation = { positionMs: 0, fresh: true, playing: false };
+    const { session } = syncedSession(obs);
+
+    session.tick(60_000);
+    session.tick(61_000);
+
+    expect(session.playbackBlocked()).toBe(false);
+  });
+
+  it("declare le blocage quand ca dure", () => {
+    const obs: PlayerObservation = { positionMs: 0, fresh: true, playing: false };
+    const { session } = syncedSession(obs);
+
+    for (let t = 60_000; t <= 63_000; t += 1_000) session.tick(t);
+
+    expect(session.playbackBlocked()).toBe(true);
+  });
+
+  it("ne parle pas de blocage sans timeline a suivre", () => {
+    const obs: PlayerObservation = { positionMs: 0, fresh: true, playing: false };
+    const { session } = syncedSession(obs);
+    for (let t = 60_000; t <= 63_000; t += 1_000) session.tick(t);
+
+    // Une pause partagee retire la timeline: il n y a plus rien a debloquer.
+    session.onServerMessage({
+      type: "room_state", code: "ABCD", youAre: "leo",
+      participants: [{ id: "leo", name: "Leo" }], queue: [], currentItemId: null, playing: false,
+    }, 64_000);
+
+    expect(session.playbackBlocked()).toBe(false);
+  });
+
+  it("repart a la position de la timeline, pas la ou il s etait arrete", () => {
+    const obs: PlayerObservation = { positionMs: 0, fresh: true, playing: false };
+    const { session, player } = syncedSession(obs);
+    for (let t = 60_000; t <= 63_000; t += 1_000) session.tick(t);
+    player.calls.length = 0;
+
+    session.resumeHere(64_000);
+
+    // Depart commun a la position 0 pour un instant serveur de 20 ms: 64 s se sont
+    // ecoulees depuis, la reprise doit viser la, pas zero.
+    expect(player.calls.some((c) => c.startsWith("seek:63"))).toBe(true);
+    expect(player.calls).toContain("play");
+    expect(session.playbackBlocked()).toBe(false);
+  });
+});
+
 describe("mise en attente", () => {
   it("se place a la position annoncee et se met en pause", () => {
     const obs: PlayerObservation = { positionMs: 58_000, fresh: true, playing: true };

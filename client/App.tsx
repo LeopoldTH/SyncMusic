@@ -51,6 +51,8 @@ export function App() {
   const [link, setLink] = useState("");
   const [now, setNow] = useState(() => Date.now());
   const [pairGap, setPairGap] = useState<number | null>(null);
+  /* Le lecteur devrait jouer et ne joue pas: il faut un geste de cet appareil-ci. */
+  const [blocked, setBlocked] = useState(false);
   const [drift, setDrift] = useState<readonly DriftPoint[]>([]);
   const [pseudo, setPseudo] = useState(() => window.localStorage.getItem("syncmusic.pseudo") ?? "");
   /*
@@ -426,6 +428,7 @@ export function App() {
       current.tick(Date.now());
       setPairGap(current.pairGapMs());
       setDrift([...current.driftPoints()]);
+      setBlocked(current.playbackBlocked());
     }, LOOP_MS);
     return () => clearInterval(timer);
   }, []);
@@ -709,6 +712,26 @@ export function App() {
 
       <section className="stage">
         <PlayerFrame onMountedChange={setFrameMounted} />
+
+        {/*
+          * Aucun navigateur mobile ne laisse une machine distante lancer du son chez
+          * toi: celui qui n a pas appuye sur Lecture doit faire son propre geste. Ce
+          * bouton est ce geste. Sans lui on reste devant un cadre noir, sans rien qui
+          * dise quoi faire, ce qui rendait l application inutilisable sur telephone.
+          */}
+        {blocked ? (
+          <button
+            type="button"
+            className="btn btn--primary unblock"
+            onClick={() => {
+              armPlayback();
+              session.current?.resumeHere(Date.now());
+              setBlocked(false);
+            }}
+          >
+            Touche pour lancer la musique
+          </button>
+        ) : null}
         <div className="now">
           {current === null ? (
             <h1 className="now__title now__title--idle">Rien en lecture</h1>

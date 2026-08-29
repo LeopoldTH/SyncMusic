@@ -34,6 +34,12 @@ export function createSession(deps: SessionDeps) {
   let pending: { barrierId: number; positionMs: number } | null = null;
   /** Barriere pour laquelle on s est deja declare pret. On ne le dit qu une fois. */
   let readyFor: number | null = null;
+  /*
+   * Tours consecutifs ou l on devrait jouer sans que le lecteur avance. Compte plutot
+   * que decide immediatement: un lecteur qui charge ou qui met tampon passe par cet
+   * etat une seconde ou deux sans que rien n aille mal.
+   */
+  let stuckTicks = 0;
   let inFlight: { endsAtMs: number } | null = null;
   let pairGap: number | null = null;
   let stallAnnounced = false;
@@ -60,6 +66,7 @@ export function createSession(deps: SessionDeps) {
           if (!message.playing) {
             player.pause();
             start = null;
+            stuckTicks = 0;
           }
           return;
 
@@ -90,6 +97,7 @@ export function createSession(deps: SessionDeps) {
           if (pending !== null && pending.barrierId === message.barrierId) return;
           // On se place la ou le serveur l indique, puis on attend d etre pret.
           start = null;
+          stuckTicks = 0;
           pending = { barrierId: message.barrierId, positionMs: message.positionMs };
           player.pause();
           player.seekTo(message.positionMs, nowMs);
@@ -166,6 +174,7 @@ export function createSession(deps: SessionDeps) {
        */
       if (player.takeEnded() && currentItemId !== null) {
         start = null;
+        stuckTicks = 0;
         send({ type: "track_ended", itemId: currentItemId });
         return;
       }
@@ -200,7 +209,11 @@ export function createSession(deps: SessionDeps) {
        * Ce qu il faut corriger, c est le fait que le lecteur soit arrete, pas sa
        * position — et cela ne se decide pas ici.
        */
-      if (!observation.playing) return;
+      if (!observation.playing) {
+        stuckTicks += 1;
+        return;
+      }
+      stuckTicks = 0;
 
       const offset = clock.estimate().offsetMs;
       const target = targetPositionMs(start, offset, nowMs) + outputLatencyMs;
@@ -239,6 +252,31 @@ export function createSession(deps: SessionDeps) {
 
     pairGapMs(): number | null {
       return pairGap;
+    },
+
+    /*
+     * Le lecteur devrait jouer et ne joue pas, depuis assez longtemps pour que ce ne
+     * soit ni un chargement ni un tampon.
+     *
+     * Sur telephone, c est le cas nominal et non une panne: aucun navigateur mobile
+     * n autorise une machine distante a lancer du son chez toi. Celui qui n a pas
+     * appuye sur Lecture doit donc faire son propre geste, et l interface doit le lui
+     * demander — sinon il reste devant un cadre noir sans rien comprendre.
+     */
+    playbackBlocked(): boolean {
+      return start !== null && stuckTicks >= 3;
+    },
+
+    /**
+     * Relance le lecteur ici et maintenant. A appeler DANS le gestionnaire du geste:
+     * c est le geste qui porte l autorisation, pas l appel.
+     */
+    resumeHere(nowMs: number): void {
+      if (start === null) return;
+      const offset = clock.estimate().offsetMs;
+      player.seekTo(targetPositionMs(start, offset, nowMs) + outputLatencyMs, nowMs);
+      player.play({ automatic: false }, nowMs);
+      stuckTicks = 0;
     },
 
     setOutputLatencyMs(value: number): void {

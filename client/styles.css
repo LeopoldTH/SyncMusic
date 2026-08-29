@@ -331,6 +331,16 @@ button, input, select {
 }
 .queue__remove:hover { color: var(--accent-press); }
 
+/* Deblocage de la lecture. Pleine largeur et haut sur mobile: c est la seule chose a
+   faire a cet instant, et la rater laisse devant un cadre noir muet. */
+.unblock {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding: 16px;
+  font-size: 0.85rem;
+}
+
 /* --- Module CHERCHER -------------------------------------------------------- */
 
 .results__bar {
