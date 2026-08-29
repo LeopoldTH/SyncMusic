@@ -25,6 +25,7 @@ const rendu = (props: Partial<Parameters<typeof Playlists>[0]> = {}): string =>
         onCreate={noop}
         onAddLink={noop}
         onAddEntry={noop}
+        onAddResult={noop}
         {...props}
       />
     </MemoryRouter>,
@@ -48,7 +49,7 @@ describe("ecran playlists", () => {
     expect(html).toContain("vide");
   });
 
-  it("montre le detail de la playlist selectionnee, avec les deux sources d ajout", () => {
+  it("montre le detail de la playlist selectionnee, avec les trois sources d ajout", () => {
     const html = rendu({
       playlists: deux,
       selectedId: 1,
@@ -59,6 +60,19 @@ describe("ecran playlists", () => {
     expect(html).toContain("Colle un lien YouTube");
     expect(html).toContain("Depuis ton historique");
     expect(html).toContain("Never Gonna");
+    // Troisieme source, livree avec la barre de recherche (R8).
+    expect(html).toContain("Par recherche");
+    expect(html).toContain("Cherche un titre, un artiste");
+  });
+
+  /*
+   * L historique peut etre vide, la recherche reste offerte: c est justement le cas
+   * ou elle sert le plus, un compte neuf n ayant rien a piocher derriere lui.
+   */
+  it("offre la recherche meme sans historique", () => {
+    const html = rendu({ playlists: deux, selectedId: 1, items: [], recent: [] });
+    expect(html).toContain("Par recherche");
+    expect(html).not.toContain("Depuis ton historique");
   });
 
   it("ne montre pas de detail sans selection", () => {

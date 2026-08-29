@@ -26,6 +26,7 @@ import { Transport as TransportBar } from "./components/Transport";
 import { SyncBadge } from "./components/SyncBadge";
 import { RoomCode } from "./components/RoomCode";
 import { LeaveButton } from "./components/LeaveButton";
+import { Search } from "./components/Search";
 import { PlayerFrame } from "./components/PlayerFrame";
 import { DriftChart } from "./components/DriftChart";
 import { LatencyCalibration } from "./components/LatencyCalibration";
@@ -480,6 +481,9 @@ export function App() {
           addToSelected({ videoId: parsed.videoId, title: null });
         }}
         onAddEntry={(entry) => addToSelected({ videoId: entry.videoId, title: entry.title })}
+        /* La recherche connait deja le titre: l ecrire evite un aller-retour oEmbed
+           pour une information qu on tient. */
+        onAddResult={(result) => addToSelected({ videoId: result.videoId, title: result.title })}
       />
     );
   }
@@ -671,6 +675,19 @@ export function App() {
           onPause={() => send?.({ type: "control_transport", action: "pause" })}
           onNext={() => send?.({ type: "control_transport", action: "next" })}
           onPrevious={() => send?.({ type: "control_transport", action: "previous" })}
+        />
+      </section>
+
+      <section className="panel">
+        <div className="panel__head"><h2>Recherche</h2></div>
+        {/* Le titre n est pas transmis: le serveur le recupere comme pour un lien
+            colle, et une seule source de titre vaut mieux que deux qui divergent. */}
+        <Search
+          actionLabel="Ajouter"
+          onPick={(result) => {
+            send?.({ type: "queue_add", videoId: result.videoId });
+            setError(null);
+          }}
         />
       </section>
 

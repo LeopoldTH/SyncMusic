@@ -59,6 +59,7 @@ button, input, select {
 /* L etiquette gravee: l en-tete type d un module. */
 .etiquette,
 .queue-panel__head h2,
+.panel__head h2,
 .join__field span,
 .diag > summary {
   font-size: 0.72rem;
@@ -242,14 +243,19 @@ button, input, select {
 
 /* --- Module FILE ------------------------------------------------------------ */
 
-.queue-panel {
+/* `.panel` est la forme generique du module, `.queue-panel` son premier usage. Les
+   deux partagent la meme regle plutot que de la recopier: un module qui derive de
+   l autre serait un module hors charte. */
+.queue-panel,
+.panel {
   background: var(--panel);
   border: 2px solid var(--border);
   box-shadow: 5px 5px 0 var(--shadow);
   padding: 0 16px 16px;
 }
 
-.queue-panel__head {
+.queue-panel__head,
+.panel__head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -258,8 +264,10 @@ button, input, select {
   padding: 9px 16px;
   border-bottom: 2px solid var(--border);
 }
-.queue-panel__head h2 { margin: 0; }
-.queue-panel__count { color: var(--muted); font-size: 0.76rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.queue-panel__head h2,
+.panel__head h2 { margin: 0; }
+.queue-panel__count,
+.panel__count { color: var(--muted); font-size: 0.76rem; letter-spacing: 0.08em; text-transform: uppercase; }
 
 .add { display: flex; gap: 10px; margin-bottom: 14px; }
 .add input {
@@ -324,6 +332,28 @@ button, input, select {
 .queue__remove:hover { color: var(--accent-press); }
 /* Sans pointeur fin (tactile), le survol n existe pas: le bouton reste visible. */
 @media (hover: none) { .queue__remove { opacity: 1; } }
+
+/* --- Module CHERCHER -------------------------------------------------------- */
+
+.results { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+
+.results__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  background: var(--bg);
+  border: 2px solid var(--line);
+}
+
+.results__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+/* Un titre YouTube deborde vite: il se coupe plutot que d elargir le module. */
+.results__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.results__channel { color: var(--muted); font-size: 0.74rem; letter-spacing: 0.06em; text-transform: uppercase; }
+
+.results__add { padding: 6px 12px; font-size: 0.72rem; box-shadow: 2px 2px 0 var(--shadow); flex-shrink: 0; }
+
+.search .hint, .search .error { margin-top: 12px; }
 
 .empty { color: var(--muted); text-align: center; padding: 22px 12px; }
 .empty strong { display: block; color: var(--text); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 3px; }
@@ -417,8 +447,9 @@ button, input, select {
 @media (max-width: 560px) {
   .shell { padding: 14px 14px 48px; gap: 14px; }
   .top__brand { width: 100%; margin-right: 0; }
-  /* Zone tactile >= 44px, regle de la charte. */
+  /* Zones tactiles >= 44px, regle de la charte. */
   .top__leave { padding: 12px 14px; margin-left: auto; }
+  .results__add { padding: 12px 14px; }
   .transport { flex-wrap: wrap; }
   .btn--primary { flex: 1; }
   .sync__detail { margin-left: 0; width: 100%; text-align: left; }

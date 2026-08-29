@@ -14,6 +14,8 @@ import { parseClientMessage, PSEUDO_MAX_CHARS, VideoId, type ServerMessage } fro
 import { createRegistry, type Room } from "./roomRegistry";
 import { fetchVideoTitle } from "./videoTitle";
 import { createStaticHandler } from "./static";
+import { searchVideos } from "./youtubeSearch";
+import { createSearchBudget } from "./searchBudget";
 import { LIMITS, openDatabase, resolveDbPath, type HistoryCursor, type User } from "./db";
 import { createAuth, readAuthConfig, readBody, sameOrigin, sendJson } from "./auth";
 import { recordCommonStart } from "./history";
@@ -176,6 +178,39 @@ http.on("upgrade", (request, socket, head) => {
   wss.handleUpgrade(request, socket, head, (ws) => attachSocket(ws, verdict.user));
 });
 
+/*
+ * Recherche. Sans cle, la route repond qu elle n est pas configuree et le reste de
+ * l application ne change pas: comme pour les identifiants Google, une capacite
+ * absente est un mode de fonctionnement, pas une panne (R3).
+ */
+const YOUTUBE_API_KEY = process.env["YOUTUBE_API_KEY"] ?? null;
+const SEARCH_RESULTS = 10;
+/** Longueur utile d une requete. Au-dela, c est un collage, pas une recherche. */
+const SEARCH_QUERY_MAX_CHARS = 100;
+
+/*
+ * Le plafond du jour reste sous les 100 recherches quotidiennes de l API: on veut
+ * s arreter nous-memes, avec une phrase lisible, plutot que de decouvrir le mur sur
+ * un 403 de Google. Le plafond par client laisse de quoi chercher une soiree entiere
+ * sans permettre de vider la journee de tout le monde.
+ */
+const searchBudget = createSearchBudget({
+  dailyBudget: 90,
+  perClientWindowMs: 10 * 60_000,
+  perClientMax: 20,
+});
+
+/*
+ * Adresse du demandeur, telle que Fly la rapporte. Derriere le proxy, l en-tete est
+ * pose par Fly et fait autorite; en local il est absent et la socket suffit. Ce n est
+ * pas une identite: juste de quoi eviter qu un seul visiteur vide la journee.
+ */
+function clientKeyOf(request: IncomingMessage): string {
+  const forwarded = request.headers["fly-client-ip"] ?? request.headers["x-forwarded-for"];
+  const first = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+  return (first ?? "").split(",")[0]?.trim() || request.socket.remoteAddress || "inconnu";
+}
+
 /** Taille de page de l historique: assez pour un ecran, bornee pour la reponse. */
 const HISTORY_PAGE = 50;
 
@@ -232,6 +267,45 @@ async function handleApi(request: IncomingMessage, response: ServerResponse): Pr
   const method = request.method ?? "GET";
   /* Les identifiants de playlist sont sequentiels, donc enumerables: chaque route
      scope sa requete par (id, compte) et repond 404 pour la playlist d un autre. */
+  /*
+   * La recherche passe avant le controle de session: elle sert a remplir la file
+   * d une room, pas a consulter un compte, et l application entiere doit rester
+   * utilisable en invite (R3). Ce qui la protege n est donc pas le cookie mais le
+   * garde de budget, seul rempart devant un quota de cent recherches par jour.
+   */
+  if (path === "/api/search" && method === "GET") {
+    if (YOUTUBE_API_KEY === null) {
+      sendJson(response, 503, { error: "la recherche n est pas configuree sur ce serveur" });
+      return true;
+    }
+    const query = (url.searchParams.get("q") ?? "").trim().slice(0, SEARCH_QUERY_MAX_CHARS);
+    // Une recherche vide ne coute rien a refuser, et couterait une unite a poser.
+    if (query.length === 0) {
+      sendJson(response, 200, { results: [] });
+      return true;
+    }
+    const allowed = searchBudget.take(clientKeyOf(request), Date.now());
+    if (!allowed.ok) {
+      sendJson(response, 429, {
+        error: allowed.reason === "daily"
+          ? "la recherche a atteint son quota du jour, elle repart demain"
+          : "trop de recherches d affilee, laisse passer quelques minutes",
+      });
+      return true;
+    }
+    const outcome = await searchVideos(query, YOUTUBE_API_KEY, { maxResults: SEARCH_RESULTS });
+    if (!outcome.ok) {
+      sendJson(response, outcome.reason === "quota" ? 429 : 502, {
+        error: outcome.reason === "quota"
+          ? "la recherche a atteint son quota du jour, elle repart demain"
+          : "la recherche YouTube n a pas repondu, reessaie",
+      });
+      return true;
+    }
+    sendJson(response, 200, { results: outcome.results });
+    return true;
+  }
+
   const itemsPath = /^\/api\/playlists\/(\d{1,9})\/items$/.exec(path);
   if (path !== "/api/history" && path !== "/api/playlists" && itemsPath === null) return false;
 
@@ -568,12 +642,19 @@ setInterval(() => {
   }
 }, BROADCAST_MS);
 
-setInterval(() => registry.sweep(Date.now()), SWEEP_MS);
+setInterval(() => {
+  const now = Date.now();
+  registry.sweep(now);
+  searchBudget.sweep(now);
+}, SWEEP_MS);
 
 http.listen(PORT, () => {
   console.log(`SyncMusic sur http://localhost:${PORT}`);
   console.log(`Origine attendue: ${authConfig.origin} (BASE_URL)`);
   if (authConfig.clientId === null) {
     console.log("Sans identifiants Google: application 100% invite, connexion desactivee.");
+  }
+  if (YOUTUBE_API_KEY === null) {
+    console.log("Sans YOUTUBE_API_KEY: recherche desactivee, le collage de lien marche pareil.");
   }
 });

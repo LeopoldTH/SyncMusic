@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import type { Account } from "../lib/account";
 import type { Playlist, PlaylistItem } from "../lib/playlists";
 import type { HistoryEntry } from "../lib/history";
+import type { SearchResult } from "../lib/search";
+import { Search } from "./Search";
 
 /** Ce que l ecran montre de l historique recent: assez pour piocher, pas une page entiere. */
 const RECENT_SHOWN = 10;
@@ -23,6 +25,8 @@ interface Props {
   /** Recoit le lien brut: App le valide par videoId.ts et porte le message d erreur. */
   onAddLink: (link: string) => void;
   onAddEntry: (entry: HistoryEntry) => void;
+  /** Troisieme source d ajout, apres le lien et l historique (R8). */
+  onAddResult: (result: SearchResult) => void;
 }
 
 /*
@@ -32,7 +36,7 @@ interface Props {
  */
 export function Playlists({
   account, playlists, selectedId, items, recent, error,
-  onSelect, onCreate, onAddLink, onAddEntry,
+  onSelect, onCreate, onAddLink, onAddEntry, onAddResult,
 }: Props) {
   const [name, setName] = useState("");
   const [link, setLink] = useState("");
@@ -140,6 +144,11 @@ export function Playlists({
             />
             <button type="submit" className="btn">Ajouter</button>
           </form>
+
+          <div className="playlists__recent">
+            <h3>Par recherche</h3>
+            <Search actionLabel="Ajouter" onPick={onAddResult} />
+          </div>
 
           {recent === null || recent.length === 0 ? null : (
             <div className="playlists__recent">
