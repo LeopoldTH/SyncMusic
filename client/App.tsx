@@ -88,11 +88,22 @@ export function App() {
    * qu apres onReady. On les garde et on les rejoue.
    */
   const early = useRef<Array<{ message: ServerMessage; atMs: number }>>([]);
+  /*
+   * De quoi reconstituer une session neuve. Le lecteur peut mourir et renaitre — un
+   * aller-retour par l ecran de compte suffit — et la session nait avec lui, vierge.
+   * Sans ce rappel elle ignore qui elle est et quelle timeline suivre jusqu au
+   * prochain changement d etat cote serveur, c est-a-dire potentiellement jamais:
+   * le serveur ne rediffuse un etat que lorsqu il change.
+   */
+  const lastState = useRef<ServerMessage | null>(null);
+  const lastStart = useRef<ServerMessage | null>(null);
   const port = useRef<ReturnType<typeof createYouTubePlayer> | null>(null);
   /* Le lecteur brut, garde pour pouvoir le detruire en sortant de la room. */
   const playerRaw = useRef<InstanceType<YTPlayerCtor> | null>(null);
   const playerCreated = useRef(false);
   const [playerReady, setPlayerReady] = useState(false);
+  /* Le cadre est-il a l ecran. Pilote a lui seul la duree de vie du lecteur. */
+  const [frameMounted, setFrameMounted] = useState(false);
   /* Tout clic dans l application vaut geste utilisateur pour les conditions d utilisation. */
   const gestured = useRef(false);
   const loadedVideo = useRef<string | null>(null);
@@ -107,6 +118,9 @@ export function App() {
          * La trace se reecrit a chaque etat recu: le nom retenu est celui que le
          * serveur a valide et tronque, pas celui qu on croyait avoir envoye.
          */
+        lastState.current = message;
+        // Une pause enterre le depart commun: le rejouer relancerait la lecture.
+        if (!message.playing) lastStart.current = null;
         const me = message.participants.find((p) => p.id === message.youAre);
         if (me) {
           saveResume(window.sessionStorage, {
@@ -129,10 +143,13 @@ export function App() {
         return;
       }
       case "waiting":
+        // Le depart precedent est revolu: une barriere ouverte le remplace.
+        lastStart.current = null;
         setWaitingFor(message.waitingFor);
         setWaitingSince((previous) => previous ?? Date.now());
         return;
       case "common_start":
+        lastStart.current = message;
         setWaitingFor([]);
         setWaitingSince(null);
         return;
@@ -269,8 +286,37 @@ export function App() {
    * Un lecteur cree sans identifiant de video n emet jamais onReady: il n a rien a
    * preparer, et le cadre reste noir sans la moindre erreur.
    */
+  /*
+   * Defait le lecteur et tout ce qui en depend.
+   *
+   * Sans cela, revenir dans la vue de room apres l avoir quittee (un aller-retour par
+   * /compte suffit) laissait le garde de creation arme sur un lecteur que React venait
+   * d emporter: cadre vide, interface qui annonce « en lecture », et pas la moindre
+   * erreur pour le dire.
+   */
+  const destroyPlayer = useCallback(() => {
+    try {
+      playerRaw.current?.destroy();
+    } catch {
+      // Le cadre a pu partir avant nous: il n y a alors plus rien a detruire.
+    }
+    playerRaw.current = null;
+    playerCreated.current = false;
+    port.current = null;
+    session.current = null;
+    loadedVideo.current = null;
+    early.current = [];
+    setPlayerReady(false);
+  }, []);
+
+  // Le lecteur vit exactement le temps que son cadre est a l ecran, ni plus ni moins.
   useEffect(() => {
-    if (currentVideoId === null || playerCreated.current) return;
+    if (frameMounted) return;
+    destroyPlayer();
+  }, [frameMounted, destroyPlayer]);
+
+  useEffect(() => {
+    if (!frameMounted || currentVideoId === null || playerCreated.current) return;
     playerCreated.current = true;
     let cancelled = false;
 
@@ -308,6 +354,16 @@ export function App() {
               send: (message) => transport.current?.send(message),
             });
             loadedVideo.current = currentVideoId;
+            /*
+             * L etat de la room d abord, la timeline ensuite: une session vierge doit
+             * savoir qui elle est avant de pouvoir suivre quoi que ce soit. Rejouer
+             * un depart commun ancien est exact par construction, sa position se
+             * recalcule depuis l horloge serveur, pas depuis son age.
+             */
+            const atMs = Date.now();
+            for (const past of [lastState.current, lastStart.current]) {
+              if (past !== null) session.current.onServerMessage(past, atMs);
+            }
             for (const pending of early.current) {
               session.current.onServerMessage(pending.message, pending.atMs);
             }
@@ -330,8 +386,13 @@ export function App() {
       playerRaw.current = raw;
     });
 
-    return () => { cancelled = true; };
-  }, [currentVideoId]);
+    return () => {
+      cancelled = true;
+      /* Annule avant meme que le lecteur existe: le garde doit retomber, sinon plus
+         rien ne le creera jamais. */
+      if (playerRaw.current === null) playerCreated.current = false;
+    };
+  }, [currentVideoId, frameMounted]);
 
   /*
    * Chargement du morceau courant. Le lecteur remet la vitesse a 1 au chargement:
@@ -537,13 +598,9 @@ export function App() {
   }
 
   /*
-   * Sortie volontaire. Deux choses a defaire, et aucune ne peut etre oubliee:
-   *
-   *  - la trace de reprise, sinon la prochaine reouverture de socket nous remettrait
-   *    dans la room que l on vient de quitter (c est exactement son travail);
-   *  - le lecteur, dont le cadre disparait avec l ecran de room. Sans cette remise a
-   *    zero, le garde qui empeche de le creer deux fois empecherait aussi de le
-   *    recreer a la room suivante: cadre vide, et pas la moindre erreur pour le dire.
+   * Sortie volontaire. La trace de reprise doit partir avec la room: sans cela, la
+   * prochaine reouverture de socket nous y remettrait, ce qui est exactement son
+   * travail. Le lecteur, lui, se defait tout seul quand son cadre quitte l ecran.
    *
    * On n attend aucune confirmation du serveur: le message part sur une socket qui
    * garantit l ordre, et rester bloque sur un ecran de room que l on vient de quitter
@@ -554,15 +611,9 @@ export function App() {
     send?.({ type: "leave_room" });
     clearResume(window.sessionStorage);
     pendingResume.current = null;
-
-    playerRaw.current?.destroy();
-    playerRaw.current = null;
-    playerCreated.current = false;
-    port.current = null;
-    session.current = null;
-    loadedVideo.current = null;
-    early.current = [];
-    setPlayerReady(false);
+    // La room quittee ne doit rien souffler a la suivante.
+    lastState.current = null;
+    lastStart.current = null;
 
     setRoom(null);
     setWaitingFor([]);
@@ -602,7 +653,7 @@ export function App() {
       />
 
       <section className="stage">
-        <PlayerFrame />
+        <PlayerFrame onMountedChange={setFrameMounted} />
         <div className="now">
           {current === null ? (
             <h1 className="now__title now__title--idle">Rien en lecture</h1>
