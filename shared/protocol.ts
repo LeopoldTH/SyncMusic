@@ -52,6 +52,16 @@ export const JoinRoom = z.object({
   participantId: ParticipantId.optional(),
 }).strict();
 
+/*
+ * Sortie volontaire. A ne pas confondre avec la fermeture de la socket: celle-ci
+ * garde la place le temps du delai de grace, precisement pour qu un rafraichissement
+ * la retrouve. Partir, c est dire qu on ne revient pas, donc liberer la place tout de
+ * suite — sinon la room resterait pleine pour l ami a qui on vient de rendre le code.
+ */
+export const LeaveRoom = z.object({
+  type: z.literal("leave_room"),
+}).strict();
+
 export const QueueAdd = z.object({
   type: z.literal("queue_add"),
   videoId: VideoId,
@@ -121,7 +131,7 @@ export const SendPlaylist = z.object({
 }).strict();
 
 export const ClientMessage = z.discriminatedUnion("type", [
-  CreateRoom, JoinRoom, QueueAdd, QueueRemove, ControlTransport,
+  CreateRoom, JoinRoom, LeaveRoom, QueueAdd, QueueRemove, ControlTransport,
   ClockProbe, Ready, Stall, PositionReport, TrackEnded, SendPlaylist,
 ]);
 export type ClientMessage = z.infer<typeof ClientMessage>;

@@ -109,5 +109,24 @@ export function createBarrier(config: BarrierConfig) {
       participants.delete(participantId);
       ready.delete(participantId);
     },
+
+    /*
+     * Ce que devient une barriere ouverte apres un depart. Le quorum se recompte sur
+     * ceux qui restent: sans cette relecture, celui qui reste attend le retardataire
+     * parti jusqu au delai maximum, alors que plus personne ne viendra le declarer
+     * pret. Rendue distincte de `removeParticipant` pour que retirer quelqu un ne
+     * fasse jamais partir la lecture par effet de bord.
+     */
+    settle(atServerMs: number): BarrierOutcome {
+      if (!open) return { kind: "ignored" };
+      // Plus personne pour partir: la barriere se referme sans rien annoncer.
+      if (participants.size === 0) {
+        open = false;
+        return { kind: "ignored" };
+      }
+      return [...participants].every((p) => ready.has(p))
+        ? start(atServerMs)
+        : waiting();
+    },
   };
 }

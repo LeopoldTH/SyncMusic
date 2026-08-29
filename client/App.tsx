@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import type { Participant, QueueItem, ServerMessage } from "../shared/protocol";
 import { connect, type Transport } from "./transport/socket";
-import { loadYouTubeApi } from "./player/loadYouTubeApi";
+import { loadYouTubeApi, type YTPlayerCtor } from "./player/loadYouTubeApi";
 import { createYouTubePlayer, faultFromErrorCode } from "./player/youtubePlayer";
 import { createClockEstimator } from "./sync/clock";
 import { createDriftLog } from "./sync/driftLog";
@@ -25,6 +25,7 @@ import { Queue } from "./components/Queue";
 import { Transport as TransportBar } from "./components/Transport";
 import { SyncBadge } from "./components/SyncBadge";
 import { RoomCode } from "./components/RoomCode";
+import { LeaveButton } from "./components/LeaveButton";
 import { PlayerFrame } from "./components/PlayerFrame";
 import { DriftChart } from "./components/DriftChart";
 import { LatencyCalibration } from "./components/LatencyCalibration";
@@ -88,6 +89,8 @@ export function App() {
    */
   const early = useRef<Array<{ message: ServerMessage; atMs: number }>>([]);
   const port = useRef<ReturnType<typeof createYouTubePlayer> | null>(null);
+  /* Le lecteur brut, garde pour pouvoir le detruire en sortant de la room. */
+  const playerRaw = useRef<InstanceType<YTPlayerCtor> | null>(null);
   const playerCreated = useRef(false);
   const [playerReady, setPlayerReady] = useState(false);
   /* Tout clic dans l application vaut geste utilisateur pour les conditions d utilisation. */
@@ -324,6 +327,7 @@ export function App() {
           },
         },
       });
+      playerRaw.current = raw;
     });
 
     return () => { cancelled = true; };
@@ -532,6 +536,43 @@ export function App() {
     setError(null);
   }
 
+  /*
+   * Sortie volontaire. Deux choses a defaire, et aucune ne peut etre oubliee:
+   *
+   *  - la trace de reprise, sinon la prochaine reouverture de socket nous remettrait
+   *    dans la room que l on vient de quitter (c est exactement son travail);
+   *  - le lecteur, dont le cadre disparait avec l ecran de room. Sans cette remise a
+   *    zero, le garde qui empeche de le creer deux fois empecherait aussi de le
+   *    recreer a la room suivante: cadre vide, et pas la moindre erreur pour le dire.
+   *
+   * On n attend aucune confirmation du serveur: le message part sur une socket qui
+   * garantit l ordre, et rester bloque sur un ecran de room que l on vient de quitter
+   * serait pire que le cas rare ou il ne partirait pas (coupure reseau au meme
+   * instant). La place se libererait alors d elle-meme a la fin du delai de grace.
+   */
+  function leaveRoom(): void {
+    send?.({ type: "leave_room" });
+    clearResume(window.sessionStorage);
+    pendingResume.current = null;
+
+    playerRaw.current?.destroy();
+    playerRaw.current = null;
+    playerCreated.current = false;
+    port.current = null;
+    session.current = null;
+    loadedVideo.current = null;
+    early.current = [];
+    setPlayerReady(false);
+
+    setRoom(null);
+    setWaitingFor([]);
+    setWaitingSince(null);
+    setPairGap(null);
+    setDrift([]);
+    setLink("");
+    setError(null);
+  }
+
   const current = room.queue.find((q) => q.itemId === room.currentItemId) ?? null;
   /* Un identifiant technique ne doit jamais atteindre l ecran. */
   const nameOf = (id: string): string =>
@@ -546,6 +587,7 @@ export function App() {
         <span className="peers">
           {others.length === 0 ? "toi seul" : `avec ${others.map((p) => p.name).join(", ")}`}
         </span>
+        <LeaveButton onLeave={leaveRoom} alone={others.length === 0} />
       </header>
 
       <SyncBadge

@@ -61,6 +61,38 @@ describe("cas limites", () => {
     expect(out.kind).toBe("waiting");
   });
 
+  /*
+   * `settle` existe pour le depart volontaire: le quorum se recompte sur ceux qui
+   * restent, sinon l attente court jusqu'au delai maximum pour rien.
+   */
+  it("part des qu'un depart laisse ceux qui restent tous prets", () => {
+    const b = createBarrier(CFG);
+    const opened = b.open({ positionMs: 30_000, atServerMs: 1_000 });
+    b.ready({ barrierId: opened.barrierId, participantId: "a" }, 1_100);
+    b.removeParticipant("b");
+    expect(b.settle(1_200).kind).toBe("start");
+  });
+
+  it("attend encore quand celui qui reste n'est pas pret", () => {
+    const b = createBarrier(CFG);
+    b.open({ positionMs: 30_000, atServerMs: 1_000 });
+    b.removeParticipant("b");
+    const out = b.settle(1_200);
+    expect(out.kind).toBe("waiting");
+    if (out.kind === "waiting") expect(out.waitingFor).toEqual(["a"]);
+  });
+
+  it("ne fait rien quand la barriere est fermee ou qu'il ne reste personne", () => {
+    const closed = createBarrier(CFG);
+    expect(closed.settle(1_000).kind).toBe("ignored");
+
+    const deserted = createBarrier(CFG);
+    deserted.open({ positionMs: 30_000, atServerMs: 1_000 });
+    deserted.removeParticipant("a");
+    deserted.removeParticipant("b");
+    expect(deserted.settle(1_100).kind).toBe("ignored");
+  });
+
   it("place l'instant de depart dans le futur, jamais dans le passe", () => {
     const b = createBarrier(CFG);
     const opened = b.open({ positionMs: 30_000, atServerMs: 1_000 });

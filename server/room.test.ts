@@ -58,6 +58,73 @@ describe("arrivees et departs", () => {
 });
 
 /*
+ * Sortie volontaire. Ce qui la distingue d une deconnexion: la place part tout de
+ * suite, sans delai de grace, et rien de ce qui restait ne doit attendre le partant.
+ */
+describe("depart volontaire", () => {
+  it("libere la place immediatement, sans passer par le delai de grace", () => {
+    const room = roomWithTwo();
+    room.leave("pote", T0 + 1_000);
+
+    expect(room.state().participants).toHaveLength(1);
+    expect(room.reclaimable("pote", T0 + 1_000)).toBe(false);
+    // La place liberee est reprenable par quelqu un d autre sans attendre.
+    expect(room.join("tiers", T0 + 1_100).ok).toBe(true);
+  });
+
+  it("laisse la file intacte a celui qui reste", () => {
+    const room = roomWithTwo();
+    room.queueAdd("pote", "kJQP7kiw5Fk", T0 + 500);
+    room.leave("pote", T0 + 1_000);
+
+    expect(room.state().queue).toHaveLength(1);
+  });
+
+  it("rend la room vide quand le dernier participant part", () => {
+    const room = roomWithTwo();
+    room.leave("leo", T0 + 1_000);
+    room.leave("pote", T0 + 1_000);
+
+    expect(room.isEmpty(T0 + 1_000)).toBe(true);
+  });
+
+  it("ignore un depart de quelqu un qui n est pas la", () => {
+    const room = roomWithTwo();
+    expect(room.leave("inconnu", T0 + 1_000).kind).toBe("ignored");
+    expect(room.state().participants).toHaveLength(2);
+  });
+
+  /*
+   * Le coeur du sujet. Sans relecture du quorum, celui qui reste attend le partant
+   * jusqu au delai maximum de la barriere, soit 45 s d ecran fige alors que plus
+   * personne ne viendra le declarer pret.
+   */
+  it("fait partir la lecture quand le partant etait le dernier attendu", () => {
+    const room = roomWithTwo();
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    room.control("play", T0 + 100);
+    const waiting = room.resumeAt(0, T0 + 200);
+    room.ready("leo", waiting.barrierId, T0 + 300);
+
+    const outcome = room.leave("pote", T0 + 400);
+
+    expect(outcome.kind).toBe("start");
+  });
+
+  it("continue d attendre celui qui reste s il ne s est pas declare pret", () => {
+    const room = roomWithTwo();
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    room.control("play", T0 + 100);
+    room.resumeAt(0, T0 + 200);
+
+    const outcome = room.leave("pote", T0 + 400);
+
+    expect(outcome.kind).toBe("waiting");
+    if (outcome.kind === "waiting") expect(outcome.waitingFor).toEqual(["leo"]);
+  });
+});
+
+/*
  * Le rafraichissement de page (defaut du 23/08/2026): la socket meurt, le client
  * revient avec une identite neuve et se fait refuser une room dont il occupe deja une
  * place. La reprise de place est ce qui rend le delai de grace utilisable.

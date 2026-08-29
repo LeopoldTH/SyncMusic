@@ -130,6 +130,21 @@ export function createRoom(code: string, config: RoomConfig) {
     },
 
     /*
+     * Depart volontaire. L oppose de `disconnect`: la place se libere immediatement,
+     * sans delai de grace, parce que celui qui part a dit qu il ne revenait pas.
+     *
+     * Rend l etat de la barriere apres le depart: celui qui reste ne doit pas attendre
+     * un partant qui ne se declarera jamais pret.
+     */
+    leave(participantId: string, nowMs: number): BarrierOutcome {
+      if (!presence.has(participantId)) return { kind: "ignored" };
+      presence.delete(participantId);
+      positions.delete(participantId);
+      barrier.removeParticipant(participantId);
+      return noteStart(barrier.settle(nowMs));
+    },
+
+    /*
      * Une place est reprenable quand son occupant s est deconnecte et que le delai de
      * grace court encore. C est ce qui rend un rafraichissement de page inoffensif: le
      * client renvoie son identifiant et retrouve sa place, au lieu d en demander une

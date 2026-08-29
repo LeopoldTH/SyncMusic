@@ -426,6 +426,25 @@ function attachSocket(socket: WebSocket, user: User | null): void {
     if (!code || !room) return fail(socket, "not_in_room", "rejoins une room d abord");
 
     switch (message.type) {
+      case "leave_room": {
+        /*
+         * Couper la session de la room avant de diffuser: `membersOf` filtre sur
+         * `session.code`, donc le partant ne recoit pas l etat qu il vient de quitter.
+         * Le recevoir lui ferait reecrire sa trace de reprise et le ramenerait dans la
+         * room a la prochaine reouverture de socket.
+         */
+        session.code = null;
+        const outcome = room.leave(session.participantId, now);
+        broadcastState(code, room);
+        if (outcome.kind === "start") broadcastStart(code, room, outcome, now);
+        else if (outcome.kind === "waiting") {
+          broadcast(code, {
+            type: "waiting", barrierId: outcome.barrierId, positionMs: outcome.positionMs,
+            waitingFor: outcome.waitingFor, sinceServerMs: now,
+          });
+        }
+        return;
+      }
       case "queue_add": {
         const added = room.queueAdd(session.participantId, message.videoId, now);
         if (!added.ok) return fail(socket, added.code, added.message);

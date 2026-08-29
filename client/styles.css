@@ -120,6 +120,20 @@ button, input, select {
 
 .peers { color: var(--muted); font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
 
+/* Compact pour ne pas faire grandir la barre. L etat arme prend l accent: a cet
+   instant precis, confirmer le depart est bien l action primaire de l ecran. */
+.top__leave {
+  padding: 6px 12px;
+  font-size: 0.72rem;
+  box-shadow: 2px 2px 0 var(--shadow);
+  white-space: nowrap;
+  /* L en-tete pose son encre claire sur fond sombre, mais le bouton est un bloc
+     clair: sans cette reprise il herite du clair et devient invisible sur lui-meme. */
+  color: var(--text);
+}
+.top__leave--armed { background: var(--accent); color: #17161a; }
+.top__leave--armed:hover { background: var(--accent-press); }
+
 /* --- Module SYNC: la signature de l app ------------------------------------ */
 
 .sync {
@@ -403,6 +417,8 @@ button, input, select {
 @media (max-width: 560px) {
   .shell { padding: 14px 14px 48px; gap: 14px; }
   .top__brand { width: 100%; margin-right: 0; }
+  /* Zone tactile >= 44px, regle de la charte. */
+  .top__leave { padding: 12px 14px; margin-left: auto; }
   .transport { flex-wrap: wrap; }
   .btn--primary { flex: 1; }
   .sync__detail { margin-left: 0; width: 100%; text-align: left; }
