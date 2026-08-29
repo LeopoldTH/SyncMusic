@@ -36,7 +36,7 @@ export function RoomJoin({ account, initialName, onCreate, onJoin, error }: Prop
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Leo"
+            placeholder="Tape un pseudo"
             maxLength={20}
             autoComplete="nickname"
             aria-label="Ton pseudo"
