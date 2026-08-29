@@ -3,7 +3,7 @@ import { createSession } from "./session";
 import { createClockEstimator } from "./clock";
 import { createDriftLog } from "./driftLog";
 import { SYNC_THRESHOLDS } from "./thresholds";
-import type { ClientMessage } from "../../shared/protocol";
+import type { ClientMessage, ServerMessage } from "../../shared/protocol";
 import type { PlayerObservation, PlayerPort } from "../player/playerPort";
 
 function fakePlayer(observation: PlayerObservation) {
@@ -221,6 +221,57 @@ describe("mise en attente", () => {
     session.onServerMessage({ type: "waiting", barrierId: 2, positionMs: 90_000, waitingFor: ["leo"], sinceServerMs: 0 }, 60_000);
     session.tick(61_000);
     expect(sent.some((m) => m.type === "ready" && m.barrierId === 2)).toBe(true);
+  });
+});
+
+/*
+ * Defaut remonte le 30/08/2026, sur telephone: « le lecteur se recharge a zero en
+ * boucle, puis ecran noir ».
+ *
+ * Le serveur reannonce l attente a chaque disponibilite recue tant que le quorum n est
+ * pas atteint. Le client qui etait pret la renvoyait a chaque tour, donc chaque seconde
+ * l attente etait rediffusee, et chaque rediffusion remettait les deux lecteurs en
+ * pause et a la position de la barriere. L attente s auto-entretenait, et celui qu on
+ * attendait ne pouvait jamais demarrer.
+ */
+describe("attente qui s auto-entretient", () => {
+  const attente: ServerMessage =
+    { type: "waiting", barrierId: 2, positionMs: 0, waitingFor: ["pote"], sinceServerMs: 0 };
+
+  it("ne declare sa disponibilite qu une fois par barriere", () => {
+    const obs: PlayerObservation = { positionMs: 0, fresh: true, playing: false };
+    const { session, sent } = syncedSession(obs);
+    session.onServerMessage(attente, 60_000);
+
+    for (let t = 61_000; t <= 70_000; t += 1_000) session.tick(t);
+
+    expect(sent.filter((m) => m.type === "ready")).toHaveLength(1);
+  });
+
+  it("ne repositionne pas le lecteur sur une attente deja connue", () => {
+    const obs: PlayerObservation = { positionMs: 0, fresh: true, playing: false };
+    const { session, player } = syncedSession(obs);
+    session.onServerMessage(attente, 60_000);
+    player.calls.length = 0;
+
+    // Trois rediffusions de la meme barriere, comme le serveur en emet.
+    for (let i = 0; i < 3; i++) session.onServerMessage(attente, 61_000 + i * 1_000);
+
+    expect(player.calls).toEqual([]);
+  });
+
+  it("obeit en revanche a une barriere suivante", () => {
+    const obs: PlayerObservation = { positionMs: 0, fresh: true, playing: false };
+    const { session, player, sent } = syncedSession(obs);
+    session.onServerMessage(attente, 60_000);
+    session.tick(61_000);
+    player.calls.length = 0;
+
+    session.onServerMessage({ ...attente, barrierId: 3, positionMs: 42_000 }, 62_000);
+    session.tick(63_000);
+
+    expect(player.calls).toContain("seek:42000");
+    expect(sent.filter((m) => m.type === "ready" && m.barrierId === 3)).toHaveLength(1);
   });
 });
 

@@ -32,6 +32,8 @@ export function createSession(deps: SessionDeps) {
   let currentItemId: string | null = null;
   let start: CommonStart | null = null;
   let pending: { barrierId: number; positionMs: number } | null = null;
+  /** Barriere pour laquelle on s est deja declare pret. On ne le dit qu une fois. */
+  let readyFor: number | null = null;
   let inFlight: { endsAtMs: number } | null = null;
   let pairGap: number | null = null;
   let stallAnnounced = false;
@@ -77,6 +79,15 @@ export function createSession(deps: SessionDeps) {
           return;
 
         case "waiting":
+          /*
+           * Rediffusion de la meme attente: ne rien refaire.
+           *
+           * Le serveur reannonce l attente a chaque disponibilite recue tant que le
+           * quorum n est pas atteint. Se repositionner a chacune remettait les deux
+           * lecteurs en pause et a zero toutes les secondes, ce qui empechait
+           * precisement celui qu on attend de demarrer: l attente s auto-entretenait.
+           */
+          if (pending !== null && pending.barrierId === message.barrierId) return;
           // On se place la ou le serveur l indique, puis on attend d etre pret.
           start = null;
           pending = { barrierId: message.barrierId, positionMs: message.positionMs };
@@ -160,9 +171,16 @@ export function createSession(deps: SessionDeps) {
       }
 
       if (pending !== null) {
-        // On ne se declare pret qu une fois l estimation d horloge convergee (R12):
-        // sinon on convertirait l instant de depart avec un ecart encore faux.
-        if (observation.fresh && clock.estimate().converged) {
+        /*
+         * Une seule fois par barriere. Repeter sa disponibilite ne l avance pas — le
+         * serveur la retient — et chaque envoi lui fait rediffuser l attente a tout le
+         * monde. C etait la source de la boucle qui remettait les lecteurs a zero.
+         *
+         * On ne se declare pret qu une fois l estimation d horloge convergee (R12):
+         * sinon on convertirait l instant de depart avec un ecart encore faux.
+         */
+        if (readyFor !== pending.barrierId && observation.fresh && clock.estimate().converged) {
+          readyFor = pending.barrierId;
           send({ type: "ready", barrierId: pending.barrierId, positionMs: pending.positionMs });
         }
         return;
