@@ -107,6 +107,8 @@ export function App() {
   const [frameMounted, setFrameMounted] = useState(false);
   /* Tout clic dans l application vaut geste utilisateur pour les conditions d utilisation. */
   const gestured = useRef(false);
+  /* Le lecteur a-t-il deja recu son autorisation de jouer. Une fois suffit. */
+  const armed = useRef(false);
   const loadedVideo = useRef<string | null>(null);
 
   const handle = useCallback((message: ServerMessage) => {
@@ -283,10 +285,20 @@ export function App() {
     room?.queue.find((q) => q.itemId === room.currentItemId)?.videoId ?? null;
 
   /*
-   * Creation du lecteur, une seule fois, des qu un morceau courant existe.
+   * De quoi armer le lecteur: le morceau courant s il y en a un, sinon le premier de
+   * la file.
+   *
+   * Le lecteur ne naissait qu au premier morceau courant, c est-a-dire une fois la
+   * lecture deja lancee. Sur telephone c est trop tard: iOS et Chrome mobile exigent
+   * que l ordre de lecture parte pendant le geste de l utilisateur, sur un lecteur qui
+   * existe deja. Au moment ou l on touchait « Lecture », il n y avait rien a autoriser.
+   *
    * Un lecteur cree sans identifiant de video n emet jamais onReady: il n a rien a
-   * preparer, et le cadre reste noir sans la moindre erreur.
+   * preparer, et le cadre reste noir sans la moindre erreur. D ou le premier de la
+   * file plutot que rien.
    */
+  const primingVideoId = currentVideoId ?? room?.queue[0]?.videoId ?? null;
+
   /*
    * Defait le lecteur et tout ce qui en depend.
    *
@@ -317,14 +329,14 @@ export function App() {
   }, [frameMounted, destroyPlayer]);
 
   useEffect(() => {
-    if (!frameMounted || currentVideoId === null || playerCreated.current) return;
+    if (!frameMounted || primingVideoId === null || playerCreated.current) return;
     playerCreated.current = true;
     let cancelled = false;
 
     void loadYouTubeApi().then((Player) => {
       if (cancelled) return;
       const raw = new Player("yt-player", {
-        videoId: currentVideoId,
+        videoId: primingVideoId,
         playerVars: { rel: 0, playsinline: 1 },
         events: {
           /*
@@ -354,7 +366,7 @@ export function App() {
               thresholds: SYNC_THRESHOLDS,
               send: (message) => transport.current?.send(message),
             });
-            loadedVideo.current = currentVideoId;
+            loadedVideo.current = primingVideoId;
             /*
              * L etat de la room d abord, la timeline ensuite: une session vierge doit
              * savoir qui elle est avant de pouvoir suivre quoi que ce soit. Rejouer
@@ -393,7 +405,7 @@ export function App() {
          rien ne le creera jamais. */
       if (playerRaw.current === null) playerCreated.current = false;
     };
-  }, [currentVideoId, frameMounted]);
+  }, [primingVideoId, frameMounted]);
 
   /*
    * Chargement du morceau courant. Le lecteur remet la vitesse a 1 au chargement:
@@ -424,6 +436,36 @@ export function App() {
     window.localStorage.setItem("syncmusic.latencyMs", String(latencyMs));
     session.current?.setOutputLatencyMs(latencyMs);
   }, [latencyMs, playerReady]);
+
+  /*
+   * Demande au lecteur l autorisation de jouer, tant qu on est encore dans le geste
+   * de l utilisateur.
+   *
+   * Sur telephone, une lecture declenchee par un message reseau est refusee, en
+   * silence: c est ce qui rendait l application inutilisable sur mobile alors qu elle
+   * marchait sur ordinateur, ou les navigateurs sont laxistes. Le seul instant ou
+   * l autorisation s obtient est le geste lui-meme, et elle vaut ensuite pour ce
+   * lecteur. On lance donc puis on arrete aussitot: on ne voulait pas jouer, seulement
+   * obtenir le droit de le faire. Le depart commun decidera du vrai instant.
+   *
+   * A appeler DANS le gestionnaire d evenement, jamais apres un await: l autorisation
+   * du navigateur ne survit pas au passage a une autre tache.
+   */
+  function armPlayback(): void {
+    if (armed.current) return;
+    const raw = playerRaw.current;
+    if (raw === null) return;
+    armed.current = true;
+    // Deja en train de jouer: l autorisation est acquise, y toucher la retirerait.
+    if (port.current?.observe(Date.now()).playing) return;
+    try {
+      raw.playVideo();
+      raw.pauseVideo();
+    } catch {
+      // Lecteur pas encore pret. Le prochain geste retentera.
+      armed.current = false;
+    }
+  }
 
   const rawSend = transport.current?.send.bind(transport.current);
   const send = rawSend
@@ -635,7 +677,16 @@ export function App() {
   const others = room.participants.filter((p) => p.id !== room.youAre);
 
   return (
-    <div className="shell">
+    /*
+     * Le tout premier contact avec l ecran de room sert d autorisation, quel qu il
+     * soit. C est ce qui couvre celui qui n appuie pas sur Lecture: il ne touche
+     * jamais le transport, mais il touche forcement quelque chose, et sans ce geste
+     * son lecteur refuserait le depart commun sans rien dire.
+     *
+     * `pointerdown` et non `click`: il arrive plus tot, et certains gestes tactiles
+     * ne produisent jamais de clic.
+     */
+    <div className="shell" onPointerDown={armPlayback}>
       <header className="top">
         <span className="top__brand">SyncMusic</span>
         <RoomCode code={room.code} />
