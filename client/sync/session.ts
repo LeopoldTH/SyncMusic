@@ -170,6 +170,20 @@ export function createSession(deps: SessionDeps) {
 
       if (start === null) return;
 
+      /*
+       * Le lecteur ne joue pas alors qu on le croit en lecture: pause prise sur les
+       * controles de l iframe, publicite, ou refus du navigateur. Corriger n a alors
+       * aucun sens, la cible avance et la position ne peut pas suivre.
+       *
+       * Sans cette porte, l ecart grandissait jusqu a produire un saut en avant toutes
+       * les douze secondes environ, lecteur toujours en pause: la correction par
+       * vitesse tenait sa fenetre de dix secondes sur un lecteur immobile, puis
+       * l ecart accumule depassait le plafond et declenchait un saut vers la cible.
+       * Ce qu il faut corriger, c est le fait que le lecteur soit arrete, pas sa
+       * position — et cela ne se decide pas ici.
+       */
+      if (!observation.playing) return;
+
       const offset = clock.estimate().offsetMs;
       const target = targetPositionMs(start, offset, nowMs) + outputLatencyMs;
       const gap = observedGapMs(target, observation.positionMs);

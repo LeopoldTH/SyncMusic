@@ -160,6 +160,39 @@ describe("pause partagee", () => {
   });
 });
 
+/*
+ * Defaut remonte le 28/08/2026: lecteur en pause, mais la position saute en avant
+ * d une douzaine de secondes, toutes les douze secondes environ.
+ *
+ * Une pause prise sur les controles de l iframe ne passe pas par l etat partage: la
+ * session se croit toujours en lecture. La cible avancait donc pendant que la position
+ * restait figee, le correcteur consommait sa fenetre de dix secondes en vitesse sur un
+ * lecteur immobile, puis l ecart accumule depassait le plafond et declenchait un saut.
+ */
+describe("lecteur arrete a l insu de l application", () => {
+  it("ne corrige pas un lecteur qui ne joue pas", () => {
+    const obs: PlayerObservation = { positionMs: 58_000, fresh: true, playing: false };
+    const { session, player } = syncedSession(obs);
+
+    // Trente secondes: deux fois et demie la periode du saut observe.
+    for (let t = 60_000; t <= 90_000; t += 1_000) session.tick(t);
+
+    expect(player.calls.filter((c) => c.startsWith("seek:"))).toEqual([]);
+    expect(player.calls.filter((c) => c.startsWith("rate:"))).toEqual([]);
+  });
+
+  it("rattrape en un seul saut des que le lecteur rejoue", () => {
+    const obs: PlayerObservation = { positionMs: 58_000, fresh: true, playing: false };
+    const { session, player } = syncedSession(obs);
+    for (let t = 60_000; t <= 90_000; t += 1_000) session.tick(t);
+
+    player.set({ playing: true });
+    session.tick(91_000);
+
+    expect(player.calls.filter((c) => c.startsWith("seek:"))).toHaveLength(1);
+  });
+});
+
 describe("mise en attente", () => {
   it("se place a la position annoncee et se met en pause", () => {
     const obs: PlayerObservation = { positionMs: 58_000, fresh: true, playing: true };
