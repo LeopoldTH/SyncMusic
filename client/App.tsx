@@ -4,7 +4,7 @@ import type { Participant, QueueItem, ServerMessage } from "../shared/protocol";
 import { connect, type Transport } from "./transport/socket";
 import { loadYouTubeApi, type YTPlayerCtor } from "./player/loadYouTubeApi";
 import { createYouTubePlayer, faultFromErrorCode } from "./player/youtubePlayer";
-import { createClockEstimator } from "./sync/clock";
+import { createClockEstimator, type ClockEstimate } from "./sync/clock";
 import { createDriftLog } from "./sync/driftLog";
 import { createSession } from "./sync/session";
 import { LOOP_MS, SYNC_THRESHOLDS } from "./sync/thresholds";
@@ -52,6 +52,9 @@ export function App() {
   const [now, setNow] = useState(() => Date.now());
   const [pairGap, setPairGap] = useState<number | null>(null);
   const [drift, setDrift] = useState<readonly DriftPoint[]>([]);
+  /* Mesures du panneau de diagnostic: lues, jamais deduites. */
+  const [clockEstimate, setClockEstimate] = useState<ClockEstimate | null>(null);
+  const [interruptions, setInterruptions] = useState(0);
   const [pseudo, setPseudo] = useState(() => window.localStorage.getItem("syncmusic.pseudo") ?? "");
   /*
    * `undefined` tant que /api/me n a pas repondu. Distinguer « pas encore su » de
@@ -424,6 +427,8 @@ export function App() {
       current.tick(Date.now());
       setPairGap(current.pairGapMs());
       setDrift([...current.driftPoints()]);
+      setClockEstimate(current.clockEstimate());
+      setInterruptions(current.driftSummary(SYNC_THRESHOLDS.floorMs * 2).interruptions);
     }, LOOP_MS);
     return () => clearInterval(timer);
   }, []);
@@ -748,7 +753,12 @@ export function App() {
         <summary>Reglages et mesures</summary>
         <div className="diag__body">
           <LatencyCalibration valueMs={latencyMs} onChange={setLatencyMs} />
-          <DriftChart points={drift} thresholdMs={SYNC_THRESHOLDS.floorMs * 2} />
+          <DriftChart
+            points={drift}
+            thresholdMs={SYNC_THRESHOLDS.floorMs * 2}
+            clock={clockEstimate}
+            interruptions={interruptions}
+          />
         </div>
       </details>
     </div>

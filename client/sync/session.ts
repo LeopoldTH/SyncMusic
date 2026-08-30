@@ -254,6 +254,15 @@ export function createSession(deps: SessionDeps) {
       return log.points();
     },
 
+    /*
+     * Ce que le moteur croit savoir de l horloge, pour le panneau de mesures. Deux
+     * appareils affichent chacun le sien: la difference des deux est exactement
+     * l erreur de placement qu on cherche, au lieu de la deduire.
+     */
+    clockEstimate() {
+      return clock.estimate();
+    },
+
     driftSummary(thresholdMs: number) {
       return log.summary(thresholdMs);
     },

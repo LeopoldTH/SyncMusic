@@ -331,6 +331,19 @@ button, input, select {
 }
 .queue__remove:hover { color: var(--accent-press); }
 
+/* Mesures brutes du panneau de diagnostic. Deux colonnes, chiffres alignes: on les
+   compare entre deux appareils, donc ils doivent se lire d un coup d oeil. */
+.mesures {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 4px 16px;
+  justify-content: start;
+  margin: 14px 0 0;
+  font-size: 0.76rem;
+}
+.mesures dt { color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+.mesures dd { margin: 0; font-variant-numeric: tabular-nums; }
+
 /* --- Module CHERCHER -------------------------------------------------------- */
 
 .results__bar {

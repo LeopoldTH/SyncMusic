@@ -22,6 +22,8 @@ export interface ClockEstimate {
   roundTripMs: number;
   converged: boolean;
   samples: number;
+  /** Dispersion de la fenetre: c est elle qui decide de la convergence. */
+  spreadMs: number;
 }
 
 export interface ClockOptions {
@@ -109,6 +111,7 @@ export function createClockEstimator(options: ClockOptions = {}) {
         roundTripMs: b?.roundTripMs ?? Infinity,
         converged: window.length >= minSamples && spread <= maxSpreadMs,
         samples: window.length,
+        spreadMs: spread,
       };
     },
 

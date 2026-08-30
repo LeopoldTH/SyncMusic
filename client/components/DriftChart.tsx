@@ -4,6 +4,10 @@ interface Props {
   points: readonly DriftPoint[];
   /** Seuil au-dela duquel l ecart devient audible. Trace en repere. */
   thresholdMs: number;
+  /** Ce que cet appareil croit savoir de l horloge. `null` avant la premiere sonde. */
+  clock: { offsetMs: number; roundTripMs: number; spreadMs: number; samples: number } | null;
+  /** Nombre de fois ou la lecture a ete interrompue, stagnation ou attente. */
+  interruptions: number;
 }
 
 const WIDTH = 640;
@@ -16,7 +20,31 @@ const HEIGHT = 110;
  * La legende explique ce qu on regarde. Un graphique qu il faut se faire expliquer
  * ne sert a rien, et c est exactement ce qui s est passe avec la premiere version.
  */
-export function DriftChart({ points, thresholdMs }: Props) {
+/*
+ * Ce que cet appareil croit savoir de l horloge, en clair.
+ *
+ * Deux appareils affichent chacun le sien. La difference des deux ecarts est
+ * exactement l erreur de placement entre les participants: on la lit au lieu de la
+ * deduire d une courbe. Le compteur d interruptions dit, lui, si la lecture a ete
+ * coupee, ce qu une courbe d ecart ne montre pas.
+ */
+function Horloge({ clock, interruptions }: Pick<Props, "clock" | "interruptions">) {
+  if (clock === null || clock.samples === 0) return null;
+  return (
+    <dl className="mesures">
+      <dt>Ecart d horloge</dt>
+      <dd>{Math.round(clock.offsetMs)} ms</dd>
+      <dt>Dispersion</dt>
+      <dd>{Math.round(clock.spreadMs)} ms sur {clock.samples} sondes</dd>
+      <dt>Aller-retour</dt>
+      <dd>{Math.round(clock.roundTripMs)} ms</dd>
+      <dt>Interruptions</dt>
+      <dd>{interruptions}</dd>
+    </dl>
+  );
+}
+
+export function DriftChart({ points, thresholdMs, clock, interruptions }: Props) {
   const measured = points.filter((p) => p.pairGapMs !== null);
 
   if (measured.length < 2) {
@@ -24,6 +52,7 @@ export function DriftChart({ points, thresholdMs }: Props) {
       <figure className="chart">
         <figcaption>Ecart entre vous deux, seconde par seconde</figcaption>
         <p className="hint">La courbe apparait apres quelques secondes d ecoute a deux.</p>
+        <Horloge clock={clock} interruptions={interruptions} />
       </figure>
     );
   }
@@ -71,6 +100,7 @@ export function DriftChart({ points, thresholdMs }: Props) {
         <span className="hint">Maintenant : {Math.round(last)} ms</span>
         <span className="hint">Sous le seuil {ratio} % du temps, sur {minutes} min</span>
       </div>
+      <Horloge clock={clock} interruptions={interruptions} />
     </figure>
   );
 }
