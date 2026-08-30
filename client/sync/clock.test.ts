@@ -16,6 +16,28 @@ function sample(offsetMs: number, networkMs: number, asymmetryMs = 0): ProbeSamp
   return { clientSentAt, serverReceivedAt, serverSentAt, clientReceivedAt };
 }
 
+/*
+ * Assoupli le 30/08/2026, mesure a deux appareils: a 60 ms, ce critere gardait la
+ * lecture fermee une trentaine de secondes sur un vrai reseau. La gigue d un telephone
+ * en wifi depasse ce seuil en permanence, alors que l estimation retenue, celle du plus
+ * court aller-retour, reste bonne. Le critere doit ecarter « on n en sait rien », pas
+ * « le reseau bouge ».
+ */
+describe("tolerance a un reseau bruyant", () => {
+  it("conclut malgre une fenetre dispersee de plus de soixante millisecondes", () => {
+    const c = createClockEstimator();
+    // Trois sondes dont l asymetrie varie de 80 ms: du bruit de routeur ordinaire.
+    for (const asym of [0, 40, 80]) c.accept(sample(500, 60, asym));
+    expect(c.estimate().converged).toBe(true);
+  });
+
+  it("refuse encore de conclure sur trop peu de mesures", () => {
+    const c = createClockEstimator();
+    c.accept(sample(500, 60));
+    expect(c.estimate().converged).toBe(false);
+  });
+});
+
 describe("estimation de l'ecart d'horloge", () => {
   it("converge vers l'ecart reel sur des allers-retours reguliers", () => {
     const est = createClockEstimator();

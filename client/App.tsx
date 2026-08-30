@@ -51,8 +51,6 @@ export function App() {
   const [link, setLink] = useState("");
   const [now, setNow] = useState(() => Date.now());
   const [pairGap, setPairGap] = useState<number | null>(null);
-  /* Le lecteur devrait jouer et ne joue pas: il faut un geste de cet appareil-ci. */
-  const [blocked, setBlocked] = useState(false);
   const [drift, setDrift] = useState<readonly DriftPoint[]>([]);
   const [pseudo, setPseudo] = useState(() => window.localStorage.getItem("syncmusic.pseudo") ?? "");
   /*
@@ -109,8 +107,6 @@ export function App() {
   const [frameMounted, setFrameMounted] = useState(false);
   /* Tout clic dans l application vaut geste utilisateur pour les conditions d utilisation. */
   const gestured = useRef(false);
-  /* Le lecteur a-t-il deja recu son autorisation de jouer. Une fois suffit. */
-  const armed = useRef(false);
   const loadedVideo = useRef<string | null>(null);
 
   const handle = useCallback((message: ServerMessage) => {
@@ -428,7 +424,6 @@ export function App() {
       current.tick(Date.now());
       setPairGap(current.pairGapMs());
       setDrift([...current.driftPoints()]);
-      setBlocked(current.playbackBlocked());
     }, LOOP_MS);
     return () => clearInterval(timer);
   }, []);
@@ -439,36 +434,6 @@ export function App() {
     window.localStorage.setItem("syncmusic.latencyMs", String(latencyMs));
     session.current?.setOutputLatencyMs(latencyMs);
   }, [latencyMs, playerReady]);
-
-  /*
-   * Demande au lecteur l autorisation de jouer, tant qu on est encore dans le geste
-   * de l utilisateur.
-   *
-   * Sur telephone, une lecture declenchee par un message reseau est refusee, en
-   * silence: c est ce qui rendait l application inutilisable sur mobile alors qu elle
-   * marchait sur ordinateur, ou les navigateurs sont laxistes. Le seul instant ou
-   * l autorisation s obtient est le geste lui-meme, et elle vaut ensuite pour ce
-   * lecteur. On lance donc puis on arrete aussitot: on ne voulait pas jouer, seulement
-   * obtenir le droit de le faire. Le depart commun decidera du vrai instant.
-   *
-   * A appeler DANS le gestionnaire d evenement, jamais apres un await: l autorisation
-   * du navigateur ne survit pas au passage a une autre tache.
-   */
-  function armPlayback(): void {
-    if (armed.current) return;
-    const raw = playerRaw.current;
-    if (raw === null) return;
-    armed.current = true;
-    // Deja en train de jouer: l autorisation est acquise, y toucher la retirerait.
-    if (port.current?.observe(Date.now()).playing) return;
-    try {
-      raw.playVideo();
-      raw.pauseVideo();
-    } catch {
-      // Lecteur pas encore pret. Le prochain geste retentera.
-      armed.current = false;
-    }
-  }
 
   const rawSend = transport.current?.send.bind(transport.current);
   const send = rawSend
@@ -680,16 +645,7 @@ export function App() {
   const others = room.participants.filter((p) => p.id !== room.youAre);
 
   return (
-    /*
-     * Le tout premier contact avec l ecran de room sert d autorisation, quel qu il
-     * soit. C est ce qui couvre celui qui n appuie pas sur Lecture: il ne touche
-     * jamais le transport, mais il touche forcement quelque chose, et sans ce geste
-     * son lecteur refuserait le depart commun sans rien dire.
-     *
-     * `pointerdown` et non `click`: il arrive plus tot, et certains gestes tactiles
-     * ne produisent jamais de clic.
-     */
-    <div className="shell" onPointerDown={armPlayback}>
+    <div className="shell">
       <header className="top">
         <span className="top__brand">SyncMusic</span>
         <RoomCode code={room.code} />
@@ -713,25 +669,6 @@ export function App() {
       <section className="stage">
         <PlayerFrame onMountedChange={setFrameMounted} />
 
-        {/*
-          * Aucun navigateur mobile ne laisse une machine distante lancer du son chez
-          * toi: celui qui n a pas appuye sur Lecture doit faire son propre geste. Ce
-          * bouton est ce geste. Sans lui on reste devant un cadre noir, sans rien qui
-          * dise quoi faire, ce qui rendait l application inutilisable sur telephone.
-          */}
-        {blocked ? (
-          <button
-            type="button"
-            className="btn btn--primary unblock"
-            onClick={() => {
-              armPlayback();
-              session.current?.resumeHere(Date.now());
-              setBlocked(false);
-            }}
-          >
-            Touche pour lancer la musique
-          </button>
-        ) : null}
         <div className="now">
           {current === null ? (
             <h1 className="now__title now__title--idle">Rien en lecture</h1>

@@ -54,7 +54,22 @@ function measure(s: ProbeSample): Measured {
 export function createClockEstimator(options: ClockOptions = {}) {
   const windowSize = options.windowSize ?? 8;
   const minSamples = options.minSamples ?? 3;
-  const maxSpreadMs = options.maxSpreadMs ?? 60;
+  /*
+   * Bande de confiance, pas une exigence de precision.
+   *
+   * A 60 ms, ce critere gardait la lecture fermee une trentaine de secondes sur un
+   * vrai reseau: la gigue d un telephone en wifi depasse ce seuil en permanence, et il
+   * fallait attendre qu une fenetre de mesures chanceuse tombe. Mesure le 30/08/2026
+   * a deux appareils.
+   *
+   * Or l estimation ne retient pas la moyenne mais l echantillon au plus court
+   * aller-retour: une fenetre dispersee ne veut pas dire une mauvaise estimation, elle
+   * veut dire un reseau bruyant, et le meilleur echantillon reste le meilleur. Ce
+   * seuil doit donc ecarter « on n en sait rien », pas « le reseau bouge ». Cale sur
+   * le plancher de correction: en dessous de 300 ms, le moteur ne corrige rien de
+   * toute facon, donc exiger mieux avant de demarrer ne sert personne.
+   */
+  const maxSpreadMs = options.maxSpreadMs ?? 300;
   const smoothing = options.smoothing ?? 0.4;
   const probeIntervalMs = options.probeIntervalMs ?? 2_000;
 
