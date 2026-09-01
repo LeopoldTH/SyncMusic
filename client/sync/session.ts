@@ -37,6 +37,10 @@ export function createSession(deps: SessionDeps) {
   let inFlight: { endsAtMs: number } | null = null;
   let pairGap: number | null = null;
   let stallAnnounced = false;
+  /** Ce que l etat partage dit de la lecture, independamment de ce que fait le lecteur. */
+  let roomPlaying = false;
+  /** Un depart commun a ete demande et n a pas encore repondu: ne pas le redemander. */
+  let resyncAsked = false;
   /*
    * Compensation de la latence de sortie audio (KD8). Une enceinte Bluetooth sort le
    * son avec du retard: pour l entendre au bon moment, il faut lire en avance d autant.
@@ -57,6 +61,7 @@ export function createSession(deps: SessionDeps) {
            * l interface l affiche, et la musique continue de jouer chez les deux.
            * La reprise, elle, repasse toujours par un depart commun (R11).
            */
+          roomPlaying = message.playing;
           if (!message.playing) {
             player.pause();
             start = null;
@@ -88,6 +93,7 @@ export function createSession(deps: SessionDeps) {
            * precisement celui qu on attend de demarrer: l attente s auto-entretenait.
            */
           if (pending !== null && pending.barrierId === message.barrierId) return;
+          resyncAsked = false;
           // On se place la ou le serveur l indique, puis on attend d etre pret.
           start = null;
           pending = { barrierId: message.barrierId, positionMs: message.positionMs };
@@ -100,6 +106,7 @@ export function createSession(deps: SessionDeps) {
 
         case "common_start": {
           pending = null;
+          resyncAsked = false;
           start = message;
           if (myId !== null) log.endInterruption(myId, nowMs);
           const offset = clock.estimate().offsetMs;
@@ -167,6 +174,28 @@ export function createSession(deps: SessionDeps) {
       if (player.takeEnded() && currentItemId !== null) {
         start = null;
         send({ type: "track_ended", itemId: currentItemId });
+        return;
+      }
+
+      /*
+       * Demarrage sauvage: le lecteur joue sans qu on ait de depart commun a suivre.
+       *
+       * C est le cas nominal du premier morceau sur telephone. Aucun navigateur mobile
+       * ne laisse une machine distante lancer du son, donc l utilisateur appuie sur le
+       * bouton du lecteur lui-meme. Ce geste debloque le lecteur pour toute la session
+       * — c est pour cela que les morceaux suivants demarrent seuls — mais il part de
+       * la ou le lecteur se trouvait, a un instant que personne n a convenu, et rien ne
+       * le replace ensuite.
+       *
+       * On demande donc un depart commun, exactement celui qu un changement de morceau
+       * declenche. Le geste devient le declencheur de la synchronisation au lieu d un
+       * demarrage isole. Constate le 02/09/2026: le premier morceau partait decale et
+       * ne rattrapait jamais, le second etait propre.
+       */
+      if (roomPlaying && observation.playing && observation.fresh
+          && start === null && pending === null && !resyncAsked) {
+        resyncAsked = true;
+        send({ type: "control_transport", action: "play" });
         return;
       }
 

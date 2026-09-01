@@ -339,3 +339,73 @@ describe("reponse de sonde incoherente", () => {
     expect(clock.estimate().samples).toBe(0);
   });
 });
+
+/*
+ * Constate a deux appareils le 02/09/2026: sur telephone, le premier morceau part
+ * decale et ne rattrape jamais, alors que le suivant est propre.
+ *
+ * Aucun navigateur mobile ne laisse une machine distante lancer du son. L utilisateur
+ * appuie donc sur le bouton du lecteur YouTube lui-meme. Ce geste debloque le lecteur
+ * pour la session — d ou le morceau suivant qui demarre seul — mais il part de la ou
+ * le lecteur se trouvait, sans que personne n ait convenu de l instant.
+ */
+describe("demarrage sauvage", () => {
+  /** Une session qui sait la room en lecture, mais sans depart commun a suivre. */
+  function sansDepart(observation: PlayerObservation) {
+    const player = fakePlayer(observation);
+    const sent: ClientMessage[] = [];
+    const session = createSession({
+      player, clock: createClockEstimator(), log: createDriftLog(),
+      thresholds: SYNC_THRESHOLDS, send: (m) => sent.push(m),
+    });
+    session.onServerMessage({ type: "room_state", code: "ABCD", youAre: "leo", participants: [{ id: "leo", name: "Leo" }, { id: "pote", name: "Pote" }], queue: [], currentItemId: null, playing: true }, 0);
+    sent.length = 0;
+    player.calls.length = 0;
+    return { session, player, sent };
+  }
+
+  const demandes = (sent: ClientMessage[]) =>
+    sent.filter((m) => m.type === "control_transport");
+
+  it("demande un depart commun quand le lecteur part de lui-meme", () => {
+    const { session, sent } = sansDepart({ positionMs: 12_000, fresh: true, playing: true });
+    session.tick(1_000);
+    expect(demandes(sent)).toHaveLength(1);
+  });
+
+  it("ne le demande qu une fois tant que le serveur n a pas repondu", () => {
+    const { session, sent } = sansDepart({ positionMs: 12_000, fresh: true, playing: true });
+    for (let t = 1_000; t <= 6_000; t += 1_000) session.tick(t);
+    expect(demandes(sent)).toHaveLength(1);
+  });
+
+  it("ne demande rien quand le lecteur ne joue pas: c est le cas avant le geste", () => {
+    const { session, sent } = sansDepart({ positionMs: 0, fresh: true, playing: false });
+    session.tick(1_000);
+    expect(demandes(sent)).toHaveLength(0);
+  });
+
+  /* Sans cette garde, une pause partagee serait aussitot annulee par le revenant. */
+  it("ne relance pas une room mise en pause", () => {
+    const { session, sent } = sansDepart({ positionMs: 12_000, fresh: true, playing: true });
+    session.onServerMessage({ type: "room_state", code: "ABCD", youAre: "leo", participants: [{ id: "leo", name: "Leo" }, { id: "pote", name: "Pote" }], queue: [], currentItemId: null, playing: false }, 500);
+    session.tick(1_000);
+    expect(demandes(sent)).toHaveLength(0);
+  });
+
+  it("ne demande rien pendant une attente en cours", () => {
+    const { session, sent } = sansDepart({ positionMs: 12_000, fresh: true, playing: true });
+    session.onServerMessage({ type: "waiting", barrierId: 4, positionMs: 0, waitingFor: ["pote"], sinceServerMs: 0 }, 500);
+    session.tick(1_000);
+    expect(demandes(sent)).toHaveLength(0);
+  });
+
+  it("redemande apres une nouvelle attente restee sans suite", () => {
+    const { session, sent } = sansDepart({ positionMs: 12_000, fresh: true, playing: true });
+    session.tick(1_000);
+    // Le serveur repond, puis le depart commun aboutit et la lecture reprend seule.
+    session.onServerMessage({ type: "waiting", barrierId: 4, positionMs: 0, waitingFor: ["pote"], sinceServerMs: 0 }, 1_500);
+    session.onServerMessage({ type: "common_start", barrierId: 4, positionMs: 0, startAtServerMs: 2_000 }, 1_800);
+    expect(demandes(sent)).toHaveLength(1);
+  });
+});
