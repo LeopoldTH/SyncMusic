@@ -112,7 +112,7 @@ export function createSession(deps: SessionDeps) {
           const offset = clock.estimate().offsetMs;
           // La cible porte deja la compensation du retard si l instant est passe.
           player.seekTo(targetPositionMs(message, offset, nowMs), nowMs);
-          player.play({ automatic: true }, nowMs);
+          player.play({ automatic: true });
           stallAnnounced = false;
           return;
         }
@@ -292,8 +292,14 @@ export function createSession(deps: SessionDeps) {
       return clock.estimate();
     },
 
-    driftSummary(thresholdMs: number) {
-      return log.summary(thresholdMs);
+    /*
+     * Le seul chiffre du journal que la boucle lit a chaque tour, donc un accesseur
+     * direct. Passer par `summary()` reparcourait tout le journal deux fois par
+     * seconde, pour n en garder qu une longueur: le cout grandissait avec la duree de
+     * l ecoute, sans que rien ne l utilise.
+     */
+    interruptionsCount(): number {
+      return log.interruptions().length;
     },
 
     correcting(): boolean {

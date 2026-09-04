@@ -24,7 +24,7 @@ export interface PlayerPort {
   observe(nowMs: number): PlayerObservation;
   seekTo(positionMs: number, nowMs: number): void;
   setRate(rate: number): void;
-  play(options: { automatic: boolean }, nowMs: number): void;
+  play(options: { automatic: boolean }): void;
   pause(): void;
   load(videoId: string, nowMs: number): void;
   /** Le lecteur remet la vitesse a 1 au chargement: le moteur doit le savoir. */

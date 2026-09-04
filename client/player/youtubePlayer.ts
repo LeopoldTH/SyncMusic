@@ -89,7 +89,7 @@ export function createYouTubePlayer(options: AdapterOptions): PlayerPort {
       raw.setPlaybackRate(rate);
     },
 
-    play(opts: { automatic: boolean }, nowMs: number): void {
+    play(opts: { automatic: boolean }): void {
       /*
        * La porte ne se ferme que sur une lecture reellement automatique: premiere de
        * la session, sans aucun geste de l utilisateur, et lecteur peu visible.
@@ -102,7 +102,6 @@ export function createYouTubePlayer(options: AdapterOptions): PlayerPort {
         return;
       }
       hasStartedOnce = true;
-      void nowMs;
       raw.playVideo();
     },
 

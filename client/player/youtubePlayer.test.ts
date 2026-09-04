@@ -68,14 +68,14 @@ describe("porte de visibilite", () => {
   it("refuse une lecture automatique quand le lecteur n est pas assez visible", () => {
     const raw = fakeRaw({ seconds: 0, state: 2 });
     const p = createYouTubePlayer({ raw, visibleFraction: hidden, hasUserGesture: noGesture });
-    p.play({ automatic: true }, 0);
+    p.play({ automatic: true });
     expect(raw.calls).not.toContain("play");
   });
 
   it("autorise une lecture demandee par un geste utilisateur meme peu visible", () => {
     const raw = fakeRaw({ seconds: 0, state: 2 });
     const p = createYouTubePlayer({ raw, visibleFraction: hidden, hasUserGesture: noGesture });
-    p.play({ automatic: false }, 0);
+    p.play({ automatic: false });
     expect(raw.calls).toContain("play");
   });
 
@@ -87,10 +87,10 @@ describe("porte de visibilite", () => {
     let fraction = 1;
     const p = createYouTubePlayer({ raw, visibleFraction: () => fraction, hasUserGesture: noGesture });
 
-    p.play({ automatic: true }, 0);
+    p.play({ automatic: true });
 
     fraction = 0; // l utilisateur passe sur un autre onglet
-    p.play({ automatic: true }, 1_000);
+    p.play({ automatic: true });
     expect(raw.calls.filter((c) => c === "play")).toHaveLength(2);
   });
 
@@ -99,15 +99,15 @@ describe("porte de visibilite", () => {
     // jeu, et tu as toi-meme rejoint la room au clavier quelques minutes plus tot.
     const raw = fakeRaw({ seconds: 0, state: 2 });
     const p = createYouTubePlayer({ raw, visibleFraction: hidden, hasUserGesture: gestured });
-    p.play({ automatic: true }, 0);
+    p.play({ automatic: true });
     expect(raw.calls).toContain("play");
   });
 
   it("refuse tant que la session n a jamais demarre, meme au deuxieme essai", () => {
     const raw = fakeRaw({ seconds: 0, state: 2 });
     const p = createYouTubePlayer({ raw, visibleFraction: hidden, hasUserGesture: noGesture });
-    p.play({ automatic: true }, 0);
-    p.play({ automatic: true }, 1_000);
+    p.play({ automatic: true });
+    p.play({ automatic: true });
     expect(raw.calls).not.toContain("play");
   });
 });
@@ -117,7 +117,6 @@ describe("codes d erreur du lecteur", () => {
     expect(faultFromErrorCode(153)).toEqual({ kind: "referer_missing" });
     expect(faultFromErrorCode(101)).toEqual({ kind: "player_error", code: 101 });
   });
-
 });
 
 describe("fin de piste", () => {

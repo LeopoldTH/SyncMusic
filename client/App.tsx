@@ -428,7 +428,7 @@ export function App() {
       setPairGap(current.pairGapMs());
       setDrift([...current.driftPoints()]);
       setClockEstimate(current.clockEstimate());
-      setInterruptions(current.driftSummary(SYNC_THRESHOLDS.floorMs * 2).interruptions);
+      setInterruptions(current.interruptionsCount());
     }, LOOP_MS);
     return () => clearInterval(timer);
   }, []);

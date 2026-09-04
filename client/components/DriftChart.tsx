@@ -1,11 +1,12 @@
 import type { DriftPoint } from "../sync/driftLog";
+import type { ClockEstimate } from "../sync/clock";
 
 interface Props {
   points: readonly DriftPoint[];
   /** Seuil au-dela duquel l ecart devient audible. Trace en repere. */
   thresholdMs: number;
   /** Ce que cet appareil croit savoir de l horloge. `null` avant la premiere sonde. */
-  clock: { offsetMs: number; roundTripMs: number; spreadMs: number; samples: number } | null;
+  clock: Pick<ClockEstimate, "offsetMs" | "roundTripMs" | "spreadMs" | "samples"> | null;
   /** Nombre de fois ou la lecture a ete interrompue, stagnation ou attente. */
   interruptions: number;
 }
@@ -13,13 +14,6 @@ interface Props {
 const WIDTH = 640;
 const HEIGHT = 110;
 
-/*
- * Courbe de derive (R19). Volontairement en SVG nu: la valeur du projet est la mesure,
- * pas la bibliotheque de graphiques.
- *
- * La legende explique ce qu on regarde. Un graphique qu il faut se faire expliquer
- * ne sert a rien, et c est exactement ce qui s est passe avec la premiere version.
- */
 /*
  * Ce que cet appareil croit savoir de l horloge, en clair.
  *
@@ -44,6 +38,13 @@ function Horloge({ clock, interruptions }: Pick<Props, "clock" | "interruptions"
   );
 }
 
+/*
+ * Courbe de derive (R19). Volontairement en SVG nu: la valeur du projet est la mesure,
+ * pas la bibliotheque de graphiques.
+ *
+ * La legende explique ce qu on regarde. Un graphique qu il faut se faire expliquer
+ * ne sert a rien, et c est exactement ce qui s est passe avec la premiere version.
+ */
 export function DriftChart({ points, thresholdMs, clock, interruptions }: Props) {
   const measured = points.filter((p) => p.pairGapMs !== null);
 

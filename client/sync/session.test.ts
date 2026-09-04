@@ -16,7 +16,7 @@ function fakePlayer(observation: PlayerObservation) {
     observe: () => observation,
     seekTo: (ms) => { calls.push("seek:" + Math.round(ms)); },
     setRate: (r) => { calls.push("rate:" + r); },
-    play: () => { calls.push("play"); return null; },
+    play: () => { calls.push("play"); },
     pause: () => { calls.push("pause"); },
     load: (v) => { calls.push("load:" + v); },
     takeRateReset: () => { const p = rateReset; rateReset = false; return p; },
