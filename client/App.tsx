@@ -11,6 +11,7 @@ import { LOOP_MS, SYNC_THRESHOLDS } from "./sync/thresholds";
 import { parseVideoId } from "./lib/videoId";
 import { resolveServerUrl } from "./lib/serverUrl";
 import { readResume, saveResume, clearResume, type ResumeRecord } from "./lib/resume";
+import { aRejouer } from "./lib/replay";
 import { RoomJoin } from "./components/RoomJoin";
 import { AccountScreen } from "./components/AccountScreen";
 import { History } from "./components/History";
@@ -100,6 +101,16 @@ export function App() {
    * le serveur ne rediffuse un etat que lorsqu il change.
    */
   const lastState = useRef<ServerMessage | null>(null);
+  /* La barriere ouverte. Sans elle, une session recreee pendant une attente ne se
+     declare jamais prete et son pair reste fige jusqu au delai maximum. */
+  const lastWaiting = useRef<ServerMessage | null>(null);
+  /*
+   * La room qu on vient de quitter. Le serveur n exclut le partant que des etats
+   * diffuses APRES avoir traite sa sortie: un etat deja en vol le remettrait dans une
+   * room dont il est sorti, et reecrirait la trace de reprise qui l y ferait revenir
+   * a la prochaine reouverture de socket. Efface des qu il demande a rejoindre.
+   */
+  const leftCode = useRef<string | null>(null);
   const lastStart = useRef<ServerMessage | null>(null);
   const port = useRef<ReturnType<typeof createYouTubePlayer> | null>(null);
   /* Le lecteur brut, garde pour pouvoir le detruire en sortant de la room. */
@@ -118,13 +129,16 @@ export function App() {
     else early.current.push({ message, atMs });
     switch (message.type) {
       case "room_state": {
+        // Etat d une room qu on vient de quitter, emis avant que le serveur le sache.
+        if (leftCode.current === message.code) return;
         /*
          * La trace se reecrit a chaque etat recu: le nom retenu est celui que le
          * serveur a valide et tronque, pas celui qu on croyait avoir envoye.
          */
         lastState.current = message;
-        // Une pause enterre le depart commun: le rejouer relancerait la lecture.
-        if (!message.playing) lastStart.current = null;
+        // Une pause enterre le depart commun et l attente: les rejouer relancerait
+        // une lecture que l etat partage vient d arreter.
+        if (!message.playing) { lastStart.current = null; lastWaiting.current = null; }
         const me = message.participants.find((p) => p.id === message.youAre);
         if (me) {
           saveResume(window.sessionStorage, {
@@ -149,10 +163,13 @@ export function App() {
       case "waiting":
         // Le depart precedent est revolu: une barriere ouverte le remplace.
         lastStart.current = null;
+        lastWaiting.current = message;
         setWaitingFor(message.waitingFor);
         setWaitingSince((previous) => previous ?? Date.now());
         return;
       case "common_start":
+        // La barriere a rendu son verdict: il n y a plus d attente a rejouer.
+        lastWaiting.current = null;
         lastStart.current = message;
         setWaitingFor([]);
         setWaitingSince(null);
@@ -374,12 +391,9 @@ export function App() {
              * un depart commun ancien est exact par construction, sa position se
              * recalcule depuis l horloge serveur, pas depuis son age.
              */
-            const atMs = Date.now();
-            for (const past of [lastState.current, lastStart.current]) {
-              if (past !== null) session.current.onServerMessage(past, atMs);
-            }
-            for (const pending of early.current) {
-              session.current.onServerMessage(pending.message, pending.atMs);
+            const memorises = [lastState.current, lastWaiting.current, lastStart.current];
+            for (const { message, atMs } of aRejouer(memorises, early.current, Date.now())) {
+              session.current.onServerMessage(message, atMs);
             }
             early.current = [];
             if (import.meta.env.DEV) {
@@ -597,9 +611,14 @@ export function App() {
       <RoomJoin
         account={account}
         initialName={pseudo}
-        onCreate={(name) => { remember(name); send?.({ type: "create_room", name }); }}
+        onCreate={(name) => {
+          remember(name);
+          leftCode.current = null;
+          send?.({ type: "create_room", name });
+        }}
         onJoin={(code, name) => {
           remember(name);
+          leftCode.current = null;
           const participantId = trace?.code === code ? trace.participantId : undefined;
           send?.({ type: "join_room", code, name, participantId });
         }}
@@ -626,12 +645,14 @@ export function App() {
    * serait pire que le cas rare ou il ne partirait pas (coupure reseau au meme
    * instant). La place se libererait alors d elle-meme a la fin du delai de grace.
    */
-  function leaveRoom(): void {
+  function leaveRoom(code: string): void {
     send?.({ type: "leave_room" });
     clearResume(window.sessionStorage);
     pendingResume.current = null;
     // La room quittee ne doit rien souffler a la suivante.
+    leftCode.current = code;
     lastState.current = null;
+    lastWaiting.current = null;
     lastStart.current = null;
 
     setRoom(null);
@@ -657,7 +678,7 @@ export function App() {
         <span className="peers">
           {others.length === 0 ? "toi seul" : `avec ${others.map((p) => p.name).join(", ")}`}
         </span>
-        <LeaveButton onLeave={leaveRoom} alone={others.length === 0} />
+        <LeaveButton onLeave={() => leaveRoom(room.code)} alone={others.length === 0} />
       </header>
 
       <SyncBadge

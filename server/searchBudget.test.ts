@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createSearchBudget } from "./searchBudget";
 
-const OPTIONS = { dailyBudget: 5, perClientWindowMs: 10 * 60_000, perClientMax: 3 };
+const OPTIONS = { dailyBudget: 5, perClientWindowMs: 10 * 60_000, perClientMax: 3, perClientDaily: 4 };
 
 /** 2026-08-29 12:00 UTC, soit le 29 aout au matin heure du Pacifique. */
 const T0 = Date.UTC(2026, 7, 29, 12, 0, 0);
@@ -75,5 +75,53 @@ describe("nettoyage", () => {
     expect(budget.state(T0).clients).toBe(1);
     budget.sweep(T0 + OPTIONS.perClientWindowMs + 1);
     expect(budget.state(T0).clients).toBe(0);
+  });
+});
+
+/*
+ * La propriete que les plafonds precedents n avaient pas, et que la revue du
+ * 04/09/2026 a mise en evidence en la rejouant sur les vrais chiffres: quarante
+ * recherches toutes les dix minutes font deux cent quarante par heure, donc une seule
+ * personne fermait la journee de tout le monde en vingt minutes.
+ */
+describe("un client ne peut pas fermer la journee a lui seul", () => {
+  it("refuse au-dela de son plafond du jour, meme fenetre par fenetre", () => {
+    const budget = createSearchBudget(OPTIONS);
+    let accordees = 0;
+    // Dix fenetres de dix minutes: la cadence n est jamais en cause.
+    for (let f = 0; f < 10; f++) {
+      const base = T0 + f * (OPTIONS.perClientWindowMs + 1);
+      for (let i = 0; i < OPTIONS.perClientMax; i++) {
+        if (budget.take("a", base + i).ok) accordees++;
+      }
+    }
+    expect(accordees).toBe(OPTIONS.perClientDaily);
+  });
+
+  it("laisse le reste de la journee aux autres", () => {
+    const budget = createSearchBudget(OPTIONS);
+    for (let f = 0; f < 10; f++) {
+      const base = T0 + f * (OPTIONS.perClientWindowMs + 1);
+      for (let i = 0; i < OPTIONS.perClientMax; i++) budget.take("a", base + i);
+    }
+    expect(budget.take("b", T0 + 60_000).ok).toBe(true);
+  });
+
+  it("nomme le refus pour pouvoir l expliquer", () => {
+    const budget = createSearchBudget(OPTIONS);
+    for (let i = 0; i < OPTIONS.perClientDaily; i++) {
+      budget.take("a", T0 + i * (OPTIONS.perClientWindowMs + 1));
+    }
+    const refuse = budget.take("a", T0 + 99 * (OPTIONS.perClientWindowMs + 1));
+    expect(refuse.ok).toBe(false);
+    if (!refuse.ok) expect(refuse.reason).toBe("clientDaily");
+  });
+
+  it("rend son quota au client le lendemain", () => {
+    const budget = createSearchBudget(OPTIONS);
+    for (let i = 0; i < OPTIONS.perClientDaily; i++) {
+      budget.take("a", T0 + i * (OPTIONS.perClientWindowMs + 1));
+    }
+    expect(budget.take("a", NEXT_DAY).ok).toBe(true);
   });
 });

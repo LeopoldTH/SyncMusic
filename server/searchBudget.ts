@@ -26,13 +26,20 @@ const PACIFIC_DAY = new Intl.DateTimeFormat("en-CA", {
   day: "2-digit",
 });
 
-export type SearchRefusal = "daily" | "client";
+export type SearchRefusal = "daily" | "client" | "clientDaily";
 
 export interface SearchBudgetOptions {
   /** Recherches par journee Pacifique, pour toute l application. */
   dailyBudget: number;
   perClientWindowMs: number;
   perClientMax: number;
+  /*
+   * Plafond par client et par journee. Sans lui, le plafond par fenetre ne borne rien:
+   * quarante recherches toutes les dix minutes font deux cent quarante par heure, de
+   * quoi vider les quatre-vingt-dix du jour en vingt minutes a une seule personne. La
+   * fenetre lisse la cadence, ce plafond-ci repartit la journee.
+   */
+  perClientDaily: number;
 }
 
 export function createSearchBudget(options: SearchBudgetOptions) {
@@ -40,12 +47,15 @@ export function createSearchBudget(options: SearchBudgetOptions) {
   let spentToday = 0;
   /** Horodatages des recherches recentes, par client. */
   const recent = new Map<string, number[]>();
+  /** Recherches du jour par client, remise a zero avec le compteur global. */
+  const spentTodayBy = new Map<string, number>();
 
   function rollOver(nowMs: number): void {
     const today = PACIFIC_DAY.format(new Date(nowMs));
     if (today === day) return;
     day = today;
     spentToday = 0;
+    spentTodayBy.clear();
   }
 
   return {
@@ -53,6 +63,9 @@ export function createSearchBudget(options: SearchBudgetOptions) {
     take(clientKey: string, nowMs: number): { ok: true } | { ok: false; reason: SearchRefusal } {
       rollOver(nowMs);
       if (spentToday >= options.dailyBudget) return { ok: false, reason: "daily" };
+      if ((spentTodayBy.get(clientKey) ?? 0) >= options.perClientDaily) {
+        return { ok: false, reason: "clientDaily" };
+      }
 
       const since = nowMs - options.perClientWindowMs;
       const kept = (recent.get(clientKey) ?? []).filter((at) => at > since);
@@ -65,6 +78,7 @@ export function createSearchBudget(options: SearchBudgetOptions) {
       kept.push(nowMs);
       recent.set(clientKey, kept);
       spentToday += 1;
+      spentTodayBy.set(clientKey, (spentTodayBy.get(clientKey) ?? 0) + 1);
       return { ok: true };
     },
 

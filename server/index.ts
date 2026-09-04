@@ -193,15 +193,24 @@ const SEARCH_QUERY_MAX_CHARS = 100;
  * s arreter nous-memes, avec une phrase lisible, plutot que de decouvrir le mur sur
  * un 403 de Google.
  *
- * Le plafond par client vise le script, pas le curieux. Construire une file pour une
- * soiree demande facilement quinze ou vingt recherches d affilee, et buter dessus a ce
- * moment-la est une frustration pure: la vraie protection vient du plafond quotidien,
- * que celui-ci ne fait que repartir. D ou une valeur large.
+ * Trois plafonds, parce qu ils repondent a trois questions differentes.
+ *
+ * La fenetre de dix minutes lisse la cadence: elle vise le script, pas le curieux, et
+ * reste large parce que construire une file pour une soiree demande facilement quinze
+ * ou vingt recherches d affilee.
+ *
+ * Le plafond par client et par jour est celui qui repartit vraiment la ressource. On
+ * avait cru que le plafond quotidien global suffisait a ca (commit e255a0b); la revue
+ * du 04/09/2026 a montre le contraire en le rejouant: quarante recherches toutes les
+ * dix minutes font deux cent quarante par heure, donc une seule personne fermait la
+ * journee de tout le monde en vingt minutes. Vingt par jour laisse la soiree tranquille
+ * et demande cinq personnes pour epuiser la ressource.
  */
 const searchBudget = createSearchBudget({
   dailyBudget: 90,
   perClientWindowMs: 10 * 60_000,
   perClientMax: 40,
+  perClientDaily: 20,
 });
 
 /*
@@ -290,11 +299,12 @@ async function handleApi(request: IncomingMessage, response: ServerResponse): Pr
     }
     const allowed = searchBudget.take(clientKeyOf(request), Date.now());
     if (!allowed.ok) {
-      sendJson(response, 429, {
-        error: allowed.reason === "daily"
-          ? "la recherche a atteint son quota du jour, elle repart demain"
-          : "trop de recherches d affilee, laisse passer quelques minutes",
-      });
+      const refus = {
+        daily: "la recherche a atteint son quota du jour, elle repart demain",
+        clientDaily: "tu as atteint ton nombre de recherches pour aujourd hui",
+        client: "trop de recherches d affilee, laisse passer quelques minutes",
+      };
+      sendJson(response, 429, { error: refus[allowed.reason] });
       return true;
     }
     const outcome = await searchVideos(query, YOUTUBE_API_KEY, { maxResults: SEARCH_RESULTS });

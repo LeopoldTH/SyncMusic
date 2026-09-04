@@ -496,3 +496,73 @@ describe("recalage des positions rapportees", () => {
     expect(peers.positions.find((p) => p.participantId === "leo")?.positionMs).toBe(30_000);
   });
 });
+
+/*
+ * Defaut trouve en revue le 04/09/2026, reproduit sur le module: apres une stagnation,
+ * la barriere se resout et le serveur diffuse un depart commun, mais `playing` reste
+ * faux. Deux consequences, toutes deux silencieuses: la timeline serveur gele, et
+ * `peerPositions` cesse de ramener les positions a un instant commun. Deux clients
+ * parfaitement synchrones s affichent alors avec un ecart egal a la difference d age
+ * de leurs rapports, ce qui a fausse deux jours de mesures.
+ */
+describe("etat de lecture apres un depart commun", () => {
+  function enLecture() {
+    const room = roomWithTwo();
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    room.control("play", T0 + 100);
+    const w = room.resumeAt(0, T0 + 200);
+    room.ready("leo", w.barrierId, T0 + 300);
+    room.ready("pote", w.barrierId, T0 + 400);
+    return room;
+  }
+
+  it("se declare en lecture quand une barriere de stagnation repart", () => {
+    const room = enLecture();
+    const attente = room.stall("pote", 5_000, T0 + 1_000);
+    if (attente.kind !== "waiting") return expect.unreachable("une attente etait attendue");
+
+    room.ready("leo", attente.barrierId, T0 + 1_100);
+    const depart = room.ready("pote", attente.barrierId, T0 + 1_200);
+
+    expect(depart.kind).toBe("start");
+    expect(room.state().playing).toBe(true);
+  });
+
+  it("laisse la timeline avancer apres cette reprise", () => {
+    const room = enLecture();
+    const attente = room.stall("pote", 5_000, T0 + 1_000);
+    if (attente.kind !== "waiting") return expect.unreachable("une attente etait attendue");
+    room.ready("leo", attente.barrierId, T0 + 1_100);
+    room.ready("pote", attente.barrierId, T0 + 1_200);
+
+    expect(room.positionNow(T0 + 12_000)).toBeGreaterThan(room.positionNow(T0 + 2_000));
+  });
+
+  /*
+   * Le symptome qui a coute le plus cher: deux clients rigoureusement ensemble, dont
+   * les rapports arrivent a 900 ms d intervalle. Sans recalage, l ecart affiche vaut
+   * cet intervalle au lieu de zero.
+   */
+  it("ramene les positions a un instant commun apres une stagnation", () => {
+    const room = enLecture();
+    const attente = room.stall("pote", 5_000, T0 + 1_000);
+    if (attente.kind !== "waiting") return expect.unreachable("une attente etait attendue");
+    room.ready("leo", attente.barrierId, T0 + 1_100);
+    room.ready("pote", attente.barrierId, T0 + 1_200);
+
+    room.reportPosition("leo", { positionMs: 60_000, fresh: true }, T0 + 20_000);
+    room.reportPosition("pote", { positionMs: 60_900, fresh: true }, T0 + 20_900);
+    const positions = room.peerPositions(T0 + 20_900).positions;
+    const [a, b] = positions;
+    if (!a || !b) return expect.unreachable("deux positions etaient attendues");
+
+    expect(Math.abs(a.positionMs - b.positionMs)).toBe(0);
+  });
+
+  /* Une barriere ouverte alors que la room est en pause ne doit rien relancer. */
+  it("ne relance pas une room en pause", () => {
+    const room = enLecture();
+    room.control("pause", T0 + 1_000);
+    expect(room.state().playing).toBe(false);
+  });
+});

@@ -64,9 +64,22 @@ export function createRoom(code: string, config: RoomConfig) {
     return timeline.positionMs + Math.max(0, nowMs - timeline.startAtServerMs);
   }
 
+  /*
+   * Un depart commun est par definition une reprise: les trois ouvreurs de barriere
+   * (reprise, stagnation, arrivee en cours) veulent tous que ca reparte. La timeline
+   * et l etat de lecture se posent donc ensemble.
+   *
+   * Les separer coutait cher et en silence (revue du 04/09/2026): apres une
+   * stagnation, `playing` restait faux, la timeline gelait, et surtout
+   * `peerPositions` cessait de ramener les positions a un instant commun. Deux
+   * clients rigoureusement synchrones s affichaient alors avec un ecart egal a la
+   * difference d age de leurs rapports, soit pres d une seconde de decalage
+   * imaginaire. C est ce chiffre-la qu on a poursuivi deux jours.
+   */
   function noteStart(outcome: BarrierOutcome): BarrierOutcome {
     if (outcome.kind === "start") {
       timeline = { positionMs: outcome.positionMs, startAtServerMs: outcome.startAtServerMs };
+      playing = true;
     }
     return outcome;
   }
@@ -318,7 +331,6 @@ export function createRoom(code: string, config: RoomConfig) {
     },
 
     resumeAt(positionMs: number, nowMs: number): Waiting {
-      playing = true;
       return barrier.open({ positionMs, atServerMs: nowMs });
     },
 
