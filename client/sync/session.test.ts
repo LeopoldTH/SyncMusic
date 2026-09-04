@@ -21,7 +21,6 @@ function fakePlayer(observation: PlayerObservation) {
     load: (v) => { calls.push("load:" + v); },
     takeRateReset: () => { const p = rateReset; rateReset = false; return p; },
     takeEnded: () => false,
-    takeFault: () => null,
   };
   return port;
 }

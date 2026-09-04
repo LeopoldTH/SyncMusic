@@ -18,15 +18,13 @@ export interface PlayerObservation {
 
 export type PlayerFault =
   | { kind: "referer_missing" }        // code 153: en-tete Referer absent
-  | { kind: "playback_refused" }        // le navigateur a refuse la lecture scriptee
-  | { kind: "not_visible" }             // conditions d utilisation: lecteur pas assez visible
   | { kind: "player_error"; code: number };
 
 export interface PlayerPort {
   observe(nowMs: number): PlayerObservation;
   seekTo(positionMs: number, nowMs: number): void;
   setRate(rate: number): void;
-  play(options: { automatic: boolean }, nowMs: number): PlayerFault | null;
+  play(options: { automatic: boolean }, nowMs: number): void;
   pause(): void;
   load(videoId: string, nowMs: number): void;
   /** Le lecteur remet la vitesse a 1 au chargement: le moteur doit le savoir. */
@@ -37,5 +35,4 @@ export interface PlayerPort {
    * rouvre a la position figee et le morceau repart: la file boucle sur son premier titre.
    */
   takeEnded(): boolean;
-  takeFault(): PlayerFault | null;
 }

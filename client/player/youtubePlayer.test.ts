@@ -68,14 +68,14 @@ describe("porte de visibilite", () => {
   it("refuse une lecture automatique quand le lecteur n est pas assez visible", () => {
     const raw = fakeRaw({ seconds: 0, state: 2 });
     const p = createYouTubePlayer({ raw, visibleFraction: hidden, hasUserGesture: noGesture });
-    expect(p.play({ automatic: true }, 0)).toEqual({ kind: "not_visible" });
+    p.play({ automatic: true }, 0);
     expect(raw.calls).not.toContain("play");
   });
 
   it("autorise une lecture demandee par un geste utilisateur meme peu visible", () => {
     const raw = fakeRaw({ seconds: 0, state: 2 });
     const p = createYouTubePlayer({ raw, visibleFraction: hidden, hasUserGesture: noGesture });
-    expect(p.play({ automatic: false }, 0)).toBe(null);
+    p.play({ automatic: false }, 0);
     expect(raw.calls).toContain("play");
   });
 
@@ -87,10 +87,10 @@ describe("porte de visibilite", () => {
     let fraction = 1;
     const p = createYouTubePlayer({ raw, visibleFraction: () => fraction, hasUserGesture: noGesture });
 
-    expect(p.play({ automatic: true }, 0)).toBe(null);
+    p.play({ automatic: true }, 0);
 
     fraction = 0; // l utilisateur passe sur un autre onglet
-    expect(p.play({ automatic: true }, 1_000)).toBe(null);
+    p.play({ automatic: true }, 1_000);
     expect(raw.calls.filter((c) => c === "play")).toHaveLength(2);
   });
 
@@ -99,43 +99,25 @@ describe("porte de visibilite", () => {
     // jeu, et tu as toi-meme rejoint la room au clavier quelques minutes plus tot.
     const raw = fakeRaw({ seconds: 0, state: 2 });
     const p = createYouTubePlayer({ raw, visibleFraction: hidden, hasUserGesture: gestured });
-    expect(p.play({ automatic: true }, 0)).toBe(null);
+    p.play({ automatic: true }, 0);
     expect(raw.calls).toContain("play");
   });
 
   it("refuse tant que la session n a jamais demarre, meme au deuxieme essai", () => {
     const raw = fakeRaw({ seconds: 0, state: 2 });
     const p = createYouTubePlayer({ raw, visibleFraction: hidden, hasUserGesture: noGesture });
-    expect(p.play({ automatic: true }, 0)).toEqual({ kind: "not_visible" });
-    expect(p.play({ automatic: true }, 1_000)).toEqual({ kind: "not_visible" });
+    p.play({ automatic: true }, 0);
+    p.play({ automatic: true }, 1_000);
     expect(raw.calls).not.toContain("play");
   });
 });
 
-describe("pannes", () => {
+describe("codes d erreur du lecteur", () => {
   it("nomme l absence d en-tete Referer derriere le code 153", () => {
     expect(faultFromErrorCode(153)).toEqual({ kind: "referer_missing" });
     expect(faultFromErrorCode(101)).toEqual({ kind: "player_error", code: 101 });
   });
 
-  it("signale un refus de lecture quand l ordre n aboutit pas", () => {
-    const raw = fakeRaw({ seconds: 0, state: 2 });
-    const p = createYouTubePlayer({ raw, visibleFraction: visible, hasUserGesture: noGesture });
-    p.play({ automatic: false }, 0);
-    p.observe(100);                 // pas encore en lecture, on laisse sa chance
-    expect(p.takeFault()).toBe(null);
-    p.observe(2_000);               // toujours pas: le navigateur a refuse
-    expect(p.takeFault()).toEqual({ kind: "playback_refused" });
-  });
-
-  it("ne signale rien quand la lecture demarre normalement", () => {
-    const raw = fakeRaw({ seconds: 0, state: 2 });
-    const p = createYouTubePlayer({ raw, visibleFraction: visible, hasUserGesture: noGesture });
-    p.play({ automatic: false }, 0);
-    raw.state = 1;
-    p.observe(2_000);
-    expect(p.takeFault()).toBe(null);
-  });
 });
 
 describe("fin de piste", () => {

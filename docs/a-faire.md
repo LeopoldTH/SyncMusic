@@ -2,11 +2,24 @@
 
 Points remontés en usage réel, hors du plan initial.
 
+## Périmètre de la V1
+
+**La V1 vise deux ordinateurs. Le téléphone est repoussé** (décision du 02/09/2026, après deux jours d'essais à deux appareils).
+
+Deux obstacles, tous deux constatés et compris, aucun n'étant un défaut du moteur :
+
+- **Le premier démarrage exige un geste sur le lecteur YouTube lui-même.** Aucun navigateur mobile ne laisse une machine distante lancer du son chez toi. Ce geste débloque le lecteur pour toute la session, d'où les morceaux suivants qui partent seuls. Incompressible : c'est la règle de la plateforme, pas un bug.
+- **La correction par vitesse coupe le son sur mobile.** Vérifié le 02/09/2026 hors de l'app, en changeant la vitesse sur une vidéo YouTube dans Safari iOS : micro-coupure à chaque changement, aucune sur ordinateur. Le moteur abîme donc au lieu de réparer dès qu'il corrige, et l'écart ne se referme jamais. C'est le vrai bloqueur.
+
+Ce qu'il faudra faire quand le mobile reviendra : mesurer si une correction par vitesse a réellement réduit l'écart, et sauter plutôt qu'accélérer sur les appareils où elle n'aboutit pas. Sans détection de plateforme : l'app constate et s'adapte.
+
+Le réglage « Retard de mon enceinte » compense le retard constant d'un appareil et n'a jamais été essayé. À tester avant tout code, il peut suffire à rendre l'écoute agréable même sans correction automatique.
+
 ## À traiter
 
+- **KTD13 n'est pas implémenté.** Le plan dit qu'un refus de lecture par le navigateur « se déclare, il ne se subit pas ». L'adaptateur produisait bien ce diagnostic, mais rien ne l'a jamais lu : la machinerie morte a été retirée le 02/09/2026 plutôt que laissée en place à faire croire le contraire. Si le besoin revient, c'est à réimplémenter de bout en bout, consommateur compris.
 - **Playlists à deux.** Que se passe-t-il quand les deux participants veulent envoyer une playlist ? Remplace-t-elle la file ou s'y ajoute-t-elle, en bloc ou en alterné, qui a la main ? Décision produit à prendre avant d'écrire quoi que ce soit. Aujourd'hui `send_playlist` empile bêtement à la fin de la file (R9), ce qui est un choix par défaut, pas une décision.
 - **Une pause prise dans l'iframe doit-elle se propager ?** Question produit ouverte, découverte en corrigeant le saut ci-dessous. Le lecteur YouTube garde ses propres contrôles (les conditions d'utilisation l'exigent), donc cliquer la vidéo met en pause chez toi sans que ton pote le sache. Aujourd'hui, et depuis le correctif, ta lecture s'arrête, la sienne continue, et tu rattrapes en un saut quand tu relances. L'autre option est de traiter ce cas comme une stagnation (`stall`), ce qui met les deux en pause et rejoue un départ commun. C'est cohérent avec « la même musique au même instant », mais ça donne à l'iframe le pouvoir d'arrêter la musique de l'autre. À trancher, pas urgent.
-- **Les pannes du lecteur ne sont lues par personne.** `client/player/playerPort.ts` expose `takeFault()`, qui remonte notamment un refus de lecture du navigateur (`playback_refused`). Rien ne l'appelle : `client/sync/session.ts` consomme `takeRateReset()` et `takeEnded()`, jamais les pannes. Elles sont donc collectées puis jetées, et un refus de lecture reste muet à l'écran.
 - **Dashboards.** Idée à cadrer : le mot peut désigner des statistiques d'écoute personnelles ou une vue d'état des rooms. Rien à faire tant que ce n'est pas tranché.
 - **Recommandation.** Idée à cadrer. Dépend des données d'historique, qui existent depuis U5 mais restent maigres.
 - **Rejoindre une room déjà commencée.** Un correctif est en place (le serveur tient sa timeline et ouvre un départ commun à l'arrivée, commit `9fe7f8c`) et vérifié à deux fenêtres. À reconfirmer en conditions réelles, sur deux machines.

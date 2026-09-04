@@ -47,9 +47,7 @@ export function createYouTubePlayer(options: AdapterOptions): PlayerPort {
   let lastAdvanceAtMs: number | null = null;
   let echoUntilMs = 0;
   let rateResetPending = false;
-  let fault: PlayerFault | null = null;
   let hasStartedOnce = false;
-  let playRequestedAtMs: number | null = null;
   let endedPending = false;
   let wasEnded = false;
 
@@ -62,13 +60,6 @@ export function createYouTubePlayer(options: AdapterOptions): PlayerPort {
       // Front montant seulement: l etat reste a ENDED tant qu on ne charge rien d autre.
       if (state === ENDED && !wasEnded) endedPending = true;
       wasEnded = state === ENDED;
-
-      // Un ordre de lecture qui n aboutit pas au tour suivant est un refus du
-      // navigateur. playVideo() ne rend aucune promesse: c est le seul signal.
-      if (playRequestedAtMs !== null && nowMs - playRequestedAtMs > staleAfterMs) {
-        if (!playing) fault = { kind: "playback_refused" };
-        playRequestedAtMs = null;
-      }
 
       if (lastPositionMs === null || positionMs > lastPositionMs + 1) {
         lastPositionMs = positionMs;
@@ -98,7 +89,7 @@ export function createYouTubePlayer(options: AdapterOptions): PlayerPort {
       raw.setPlaybackRate(rate);
     },
 
-    play(opts: { automatic: boolean }, nowMs: number): PlayerFault | null {
+    play(opts: { automatic: boolean }, nowMs: number): void {
       /*
        * La porte ne se ferme que sur une lecture reellement automatique: premiere de
        * la session, sans aucun geste de l utilisateur, et lecteur peu visible.
@@ -108,16 +99,14 @@ export function createYouTubePlayer(options: AdapterOptions): PlayerPort {
        * ta premiere lecture est refusee alors que tu as toi-meme rejoint la room.
        */
       if (opts.automatic && !hasStartedOnce && !hasUserGesture() && visibleFraction() <= 0.5) {
-        return { kind: "not_visible" };
+        return;
       }
       hasStartedOnce = true;
-      playRequestedAtMs = nowMs;
+      void nowMs;
       raw.playVideo();
-      return null;
     },
 
     pause(): void {
-      playRequestedAtMs = null;
       raw.pauseVideo();
     },
 
@@ -143,11 +132,6 @@ export function createYouTubePlayer(options: AdapterOptions): PlayerPort {
       return pending;
     },
 
-    takeFault(): PlayerFault | null {
-      const current = fault;
-      fault = null;
-      return current;
-    },
   };
 }
 
