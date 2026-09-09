@@ -19,7 +19,7 @@ execution: code
 
 **Product authority.** Ce plan porte un seul chantier, « voir ce qu'on a écouté ». La recommandation est un chantier voisin, hors périmètre actif.
 
-**Open blockers.** Une question bloque le découpage : que fait-on du dernier morceau d'une séance quand la room meurt en pleine lecture (voir Outstanding Questions).
+**Open blockers.** Aucun. Le découpage peut commencer.
 
 ---
 
@@ -39,8 +39,9 @@ Le coût n'est pas celui d'une fonctionnalité manquante, c'est celui d'une info
 
 - **Enregistrer avant d'afficher.** *(session-settled: user-directed — chosen over livrer l'écran d'abord : seul l'enregistrement perd de la valeur à attendre.)* Governs R1, R2, R3.
 - **L'artiste est le nom de la chaîne YouTube.** *(session-settled: user-approved — chosen over une vraie source d'artiste : gratuit et déjà récupéré, au prix d'une approximation assumée.)* Governs R2.
-- **La séance est l'unité de regroupement.** La clé déjà stockée porte l'identifiant d'instance de room, partagé par les deux participants. Governs R7.
-- **L'écran assume les petits nombres.** Il doit dire quelque chose de vrai à trois morceaux, pas attendre d'en avoir trois cents. Governs R8.
+- **La séance est l'unité de regroupement.** La clé déjà stockée porte l'identifiant d'instance de room, partagé par les deux participants. Governs R8.
+- **L'écran assume les petits nombres.** Il doit dire quelque chose de vrai à trois morceaux, pas attendre d'en avoir trois cents. Governs R9.
+- **La durée du dernier morceau se rattrape à la destruction de la room.** *(session-settled: user-directed — chosen over accepter la perte, et over une écriture continue pendant la lecture : le nettoyage des rooms vides existe déjà, et il y a exactement un endroit où se brancher.)* Governs R5.
 - **Le genre et l'artiste sous-coté sortent du périmètre.** *(session-settled: user-directed — chosen over ajouter une source de métadonnées musicales : ni oEmbed ni l'API YouTube ne donnent de genre, et « sous-coté » n'a pas encore de définition.)*
 
 ### Actors
@@ -56,14 +57,15 @@ Le coût n'est pas celui d'une fonctionnalité manquante, c'est celui d'une info
 - R2. Chaque morceau joué retient le nom de la chaîne qui l'a publié, quand la source le fournit.
 - R3. Chaque morceau joué retient l'adresse de sa miniature, quand la source la fournit.
 - R4. Un morceau dont l'artiste ou la miniature n'a pas pu être récupéré reste enregistré, sans eux.
+- R5. La durée du morceau en cours est écrite quand la room est détruite, pour qu'une soirée abandonnée en pleine lecture ne perde pas son dernier morceau.
 
 **Ce qu'on montre**
 
-- R5. L'écran affiche des compteurs cumulés : temps écouté, nombre de morceaux, nombre de séances.
-- R6. L'écran affiche les morceaux et les artistes les plus écoutés.
-- R7. L'écran affiche les séances, de la plus récente à la plus ancienne, chacune avec sa date, ses morceaux et sa durée.
-- R8. L'écran reste lisible et non trompeur à faible volume : il ne présente jamais un classement construit sur trop peu de données comme s'il en portait beaucoup.
-- R9. L'écran est accessible depuis le profil, et suit la charte « Console » (`docs/design/charte.md`).
+- R6. L'écran affiche des compteurs cumulés : temps écouté, nombre de morceaux, nombre de séances.
+- R7. L'écran affiche les morceaux et les artistes les plus écoutés.
+- R8. L'écran affiche les séances, de la plus récente à la plus ancienne, chacune avec sa date, ses morceaux et sa durée.
+- R9. L'écran reste lisible et non trompeur à faible volume : il ne présente jamais un classement construit sur trop peu de données comme s'il en portait beaucoup.
+- R10. L'écran est accessible depuis le profil, et suit la charte « Console » (`docs/design/charte.md`).
 
 ### Où chaque donnée existe déjà
 
@@ -84,21 +86,22 @@ Aucune de ces trois informations ne demande un appel réseau supplémentaire : `
   - **Trigger :** un départ commun démarre un morceau dans une room.
   - **Actors :** A1, A2
   - **Steps :** le morceau est inscrit avec son artiste et sa miniature ; quand il cesse d'être le morceau courant, sa durée écoutée est ajoutée à la ligne.
-  - **Covered by :** R1, R2, R3, R4
+  - **Covered by :** R1, R2, R3, R4, R5
 
 - F2. Consulter sa mémoire
   - **Trigger :** A1 ouvre l'écran depuis son profil.
   - **Actors :** A1
   - **Steps :** les compteurs et les tops s'affichent, puis la liste des séances de la plus récente à la plus ancienne.
-  - **Covered by :** R5, R6, R7, R8, R9
+  - **Covered by :** R6, R7, R8, R9, R10
 
 ### Acceptance Examples
 
 - AE1. **Covers R1.** Un morceau lancé, mis en pause dix minutes, puis repris et zappé après trente secondes de lecture réelle, compte trente secondes.
 - AE2. **Covers R1.** Un morceau zappé au bout de dix secondes compte dix secondes, pas sa durée entière.
 - AE3. **Covers R4.** Une vidéo dont oEmbed ne répond pas est quand même enregistrée, avec son identifiant, sans artiste ni miniature.
-- AE4. **Covers R8.** Avec trois morceaux écoutés au total, l'écran affiche les trois et n'annonce pas de « top » ni de classement.
-- AE5. **Covers R7.** Deux morceaux joués dans la même room apparaissent dans une seule séance ; deux morceaux joués dans deux rooms distinctes apparaissent dans deux séances.
+- AE4. **Covers R9.** Avec trois morceaux écoutés au total, l'écran affiche les trois et n'annonce pas de « top » ni de classement.
+- AE5. **Covers R5.** Les deux participants quittent pendant la lecture du huitième morceau : ce morceau garde la durée écoutée jusqu'à leur départ, il n'est pas enregistré sans durée.
+- AE6. **Covers R8.** Deux morceaux joués dans la même room apparaissent dans une seule séance ; deux morceaux joués dans deux rooms distinctes apparaissent dans deux séances.
 
 ### Success Criteria
 
@@ -121,10 +124,6 @@ Aucune de ces trois informations ne demande un appel réseau supplémentaire : `
 - Les migrations s'ajoutent en fin de tableau ordonné, jamais en modifiant une migration livrée (`server/db.ts`).
 
 ### Outstanding Questions
-
-**Resolve Before Planning**
-
-- Que devient la durée du dernier morceau quand une room meurt en pleine lecture, les deux participants étant partis ? La rattraper à la destruction de la room, ou accepter de perdre le dernier morceau de chaque soirée.
 
 **Deferred to Planning**
 
