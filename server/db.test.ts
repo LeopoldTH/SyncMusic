@@ -643,6 +643,581 @@ describe("genres par video (U6)", () => {
   });
 });
 
+/*
+ * Lectures agregees de l ecran de statistiques (U7). Toutes bornees par le compte du
+ * demandeur: c est la seule garde de vie privee ici, les autres modules n en posant
+ * aucune sur ces colonnes.
+ *
+ * Le semeur donne a chaque test le droit de ne decrire que ce qui compte pour lui.
+ * La cle de morceau et l instance sont du bruit dans une assertion sur un classement.
+ */
+describe("statistiques d ecoute (U7)", () => {
+  interface Semis {
+    videoId?: string;
+    title?: string | null;
+    channelTitle?: string | null;
+    thumbnailUrl?: string | null;
+    instance?: string;
+    at?: number;
+    /** Absente = ligne jamais mesuree, comme les trois lignes de la base reelle. */
+    ms?: number;
+  }
+
+  function semeur(db: Db, userId: number): (semis?: Semis) => void {
+    let n = 0;
+    return (semis: Semis = {}) => {
+      n += 1;
+      const instance = semis.instance ?? "inst-1";
+      const roomItemKey = `${instance}#u${userId}-i${n}`;
+      db.recordListen({
+        userId,
+        videoId: semis.videoId ?? "dQw4w9WgXcQ",
+        title: semis.title === undefined ? "Get Lucky" : semis.title,
+        channelTitle: semis.channelTitle ?? null,
+        thumbnailUrl: semis.thumbnailUrl ?? null,
+        roomItemKey,
+        roomInstanceId: instance,
+      }, semis.at ?? T0 + n);
+      if (semis.ms !== undefined) db.addListenedMs({ roomItemKey, listenedMs: semis.ms });
+    };
+  }
+
+  describe("compteurs cumules (R6)", () => {
+    it("compte les lignes jouees, les durees connues et les seances", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      semer({ ms: 30_000 });
+      semer({ ms: 12_000 });
+      semer({ instance: "inst-2" });
+
+      expect(db.readListeningTotals(user)).toEqual({
+        listenedMs: 42_000,
+        timedTrackCount: 2,
+        trackCount: 3,
+        sessionCount: 2,
+      });
+    });
+
+    /*
+     * R9: le total de temps ne porte pas sur tout l historique quand des lignes n ont
+     * pas de duree. Il rend donc sur combien de lignes il porte, faute de quoi l ecran
+     * afficherait « 30 secondes ecoutees » pour une soiree entiere.
+     */
+    it("ignore les lignes sans duree et dit sur combien de lignes il porte (R9)", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      semer({ ms: 30_000 });
+      semer();
+      semer();
+
+      expect(db.readListeningTotals(user)).toMatchObject({
+        listenedMs: 30_000, timedTrackCount: 1, trackCount: 3,
+      });
+    });
+
+    it("rend des compteurs a zero pour un compte sans aucune ecoute", () => {
+      const db = fresh();
+      expect(db.readListeningTotals(withUser(db))).toEqual({
+        listenedMs: 0, timedTrackCount: 0, trackCount: 0, sessionCount: 0,
+      });
+    });
+  });
+
+  describe("classement des morceaux (R7, KTD10)", () => {
+    /*
+     * Covers AE4. Trois morceaux ecoutes: le classement en rend trois et annonce trois
+     * entrees distinctes. C est ce nombre, pas celui des lignes, qui laisse l ecran
+     * decider s il a le droit d ecrire « top » (Assumption: cinq entrees distinctes).
+     */
+    it("rend ses trois entrees et son compte d entrees distinctes a faible volume (AE4)", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      semer({ videoId: "video-a", ms: 30_000 });
+      semer({ videoId: "video-b", ms: 20_000 });
+      semer({ videoId: "video-c", ms: 10_000 });
+
+      const top = db.listTopTracks(user, 10);
+      expect(top.entries.map((e) => e.videoId)).toEqual(["video-a", "video-b", "video-c"]);
+      expect(top).toMatchObject({ coveredPlays: 3, distinctCount: 3 });
+    });
+
+    it("classe par temps cumule, pas par nombre d ecoutes", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      semer({ videoId: "video-court", ms: 5_000 });
+      semer({ videoId: "video-court", instance: "inst-2", ms: 5_000 });
+      semer({ videoId: "video-long", ms: 60_000 });
+
+      expect(db.listTopTracks(user, 10).entries).toEqual([
+        expect.objectContaining({ videoId: "video-long", listenedMs: 60_000, playCount: 1 }),
+        expect.objectContaining({ videoId: "video-court", listenedMs: 10_000, playCount: 2 }),
+      ]);
+    });
+
+    it("agrege un morceau joue dans deux seances et garde son titre le plus recent non nul", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      semer({ title: "Ancien titre", channelTitle: "Ancienne chaine", at: T0, ms: 10_000 });
+      semer({
+        title: "Nouveau titre", channelTitle: "Nouvelle chaine", thumbnailUrl: "https://img/nouvelle.jpg",
+        instance: "inst-2", at: T0 + JOUR, ms: 20_000,
+      });
+      semer({ title: null, instance: "inst-3", at: T0 + 2 * JOUR, ms: 5_000 });
+
+      expect(db.listTopTracks(user, 10).entries).toEqual([{
+        videoId: "dQw4w9WgXcQ",
+        title: "Nouveau titre",
+        channelTitle: "Nouvelle chaine",
+        thumbnailUrl: "https://img/nouvelle.jpg",
+        listenedMs: 35_000,
+        playCount: 3,
+      }]);
+    });
+
+    /*
+     * KTD10: a egalite de temps cumule, l identifiant decroissant departage, comme
+     * l index d historique. Sans cet ordre, deux ouvertures de l ecran renverraient le
+     * meme classement dans deux ordres differents.
+     */
+    it("departe une egalite par identifiant decroissant, identique sur deux appels", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      semer({ videoId: "video-a", ms: 30_000 });
+      semer({ videoId: "video-b", ms: 30_000 });
+
+      const premier = db.listTopTracks(user, 10).entries.map((e) => e.videoId);
+      expect(premier).toEqual(["video-b", "video-a"]);
+      expect(db.listTopTracks(user, 10).entries.map((e) => e.videoId)).toEqual(premier);
+    });
+
+    it("s arrete a la limite demandee sans mentir sur le nombre d entrees distinctes", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      for (const suffix of ["a", "b", "c", "d"]) semer({ videoId: `video-${suffix}`, ms: 10_000 });
+
+      const top = db.listTopTracks(user, 2);
+      expect(top.entries).toHaveLength(2);
+      expect(top).toMatchObject({ coveredPlays: 4, distinctCount: 4 });
+    });
+
+    it("rend un classement vide pour un compte sans aucune ecoute", () => {
+      const db = fresh();
+      expect(db.listTopTracks(withUser(db), 10)).toEqual({
+        entries: [], coveredPlays: 0, distinctCount: 0,
+      });
+    });
+  });
+
+  describe("classement des artistes (R7, R9)", () => {
+    /*
+     * Covers AE9. Le classement ne porte pas sur les vingt ecoutes, douze n ayant pas
+     * d artiste. Il le dit, faute de quoi l ecran presenterait un classement de huit
+     * lignes comme le portrait d une soiree de vingt.
+     */
+    it("annonce une couverture de huit ecoutes sur vingt quand douze n ont pas d artiste (AE9)", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      for (let i = 0; i < 8; i += 1) semer({ channelTitle: `Chaine ${i}`, ms: 10_000 });
+      for (let i = 0; i < 12; i += 1) semer({ channelTitle: null, ms: 10_000 });
+
+      expect(db.readListeningTotals(user).trackCount).toBe(20);
+      expect(db.listTopArtists(user, 50)).toMatchObject({ coveredPlays: 8, distinctCount: 8 });
+    });
+
+    it("cumule le temps de plusieurs morceaux d une meme chaine", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      semer({ videoId: "video-a", channelTitle: "Daft Punk", ms: 30_000 });
+      semer({ videoId: "video-b", channelTitle: "Daft Punk", ms: 20_000 });
+      semer({ videoId: "video-c", channelTitle: "Justice", ms: 40_000 });
+
+      expect(db.listTopArtists(user, 10).entries).toEqual([
+        { channelTitle: "Daft Punk", listenedMs: 50_000, playCount: 2 },
+        { channelTitle: "Justice", listenedMs: 40_000, playCount: 1 },
+      ]);
+    });
+
+    it("departe une egalite de facon stable sur deux appels", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      semer({ channelTitle: "Daft Punk", ms: 30_000 });
+      semer({ channelTitle: "Justice", ms: 30_000 });
+
+      const premier = db.listTopArtists(user, 10).entries.map((e) => e.channelTitle);
+      expect(premier).toEqual(["Justice", "Daft Punk"]);
+      expect(db.listTopArtists(user, 10).entries.map((e) => e.channelTitle)).toEqual(premier);
+    });
+  });
+
+  /*
+   * R9 et l etape 3 de U7: une ligne sans duree pese zero seconde. La garder dans un
+   * classement au temps la ferait figurer en queue tout en gonflant le denominateur
+   * que le classement annonce.
+   */
+  it("n ecrit aucune ligne sans duree dans les classements au temps, ni dans leur couverture", () => {
+    const db = fresh();
+    const user = withUser(db);
+    const semer = semeur(db, user);
+    semer({ videoId: "video-mesure", channelTitle: "Daft Punk", ms: 30_000 });
+    semer({ videoId: "video-inconnue", channelTitle: "Justice" });
+    semer({ videoId: "video-inconnue-2", channelTitle: "Justice" });
+
+    const tracks = db.listTopTracks(user, 10);
+    expect(tracks.entries.map((e) => e.videoId)).toEqual(["video-mesure"]);
+    expect(tracks).toMatchObject({ coveredPlays: 1, distinctCount: 1 });
+
+    const artists = db.listTopArtists(user, 10);
+    expect(artists.entries.map((e) => e.channelTitle)).toEqual(["Daft Punk"]);
+    expect(artists).toMatchObject({ coveredPlays: 1, distinctCount: 1 });
+  });
+
+  describe("classement des genres (R12, KTD10, KTD12)", () => {
+    it("compte un morceau dans chacun de ses genres, par parcours du tableau JSON", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      semer({ videoId: "video-a", ms: 10_000 });
+      db.setVideoGenres("video-a", ["Electronic music", "Pop music"]);
+
+      expect(db.listTopGenres(user, 10).entries).toEqual([
+        { genre: "Electronic music", trackCount: 1 },
+        { genre: "Pop music", trackCount: 1 },
+      ]);
+    });
+
+    it("classe par nombre de morceaux decroissant", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      semer({ videoId: "video-a", ms: 10_000 });
+      semer({ videoId: "video-b", instance: "inst-2", ms: 10_000 });
+      db.setVideoGenres("video-a", ["Pop music"]);
+      db.setVideoGenres("video-b", ["Pop music", "Jazz"]);
+
+      expect(db.listTopGenres(user, 10).entries).toEqual([
+        { genre: "Pop music", trackCount: 2 },
+        { genre: "Jazz", trackCount: 1 },
+      ]);
+    });
+
+    /*
+     * KTD10: une etiquette de genre n a pas d identifiant a departager, l ordre
+     * alphabetique tient donc lieu de departage stable.
+     */
+    it("departe deux genres a egalite par ordre alphabetique, identique sur deux appels", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      semer({ videoId: "video-a", ms: 10_000 });
+      db.setVideoGenres("video-a", ["Rock music", "Jazz"]);
+
+      const premier = db.listTopGenres(user, 10).entries.map((e) => e.genre);
+      expect(premier).toEqual(["Jazz", "Rock music"]);
+      expect(db.listTopGenres(user, 10).entries.map((e) => e.genre)).toEqual(premier);
+    });
+
+    /*
+     * KTD12: NULL est « jamais interrogee », [] est « interrogee, aucun genre ». Les
+     * deux sont hors de tout classement, mais seule la premiere reste a interroger.
+     */
+    it("ne classe ni une ligne jamais interrogee ni une ligne interrogee sans genre", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      semer({ videoId: "video-jamais", ms: 10_000 });
+      semer({ videoId: "video-sans-genre", instance: "inst-2", ms: 10_000 });
+      db.setVideoGenres("video-sans-genre", []);
+
+      expect(db.listTopGenres(user, 10)).toEqual({
+        entries: [], coveredPlays: 0, distinctCount: 0,
+      });
+      expect(db.listVideoIdsWithoutGenres(10)).toEqual(["video-jamais"]);
+    });
+
+    /*
+     * Le classement des genres compte des morceaux, pas du temps (etape 5 de U7): une
+     * ligne sans duree y compte donc pleinement. La base reelle du jour un ne porte
+     * aucune duree, et un classement de genres vide y serait une perte seche.
+     */
+    it("compte une ligne sans duree, le classement portant sur des morceaux et non du temps", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      semer({ videoId: "video-a" });
+      db.setVideoGenres("video-a", ["Pop music"]);
+
+      expect(db.listTopGenres(user, 10)).toEqual({
+        entries: [{ genre: "Pop music", trackCount: 1 }], coveredPlays: 1, distinctCount: 1,
+      });
+    });
+
+    it("annonce la couverture du classement en ecoutes reellement classees (R9)", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      semer({ videoId: "video-a", ms: 10_000 });
+      semer({ videoId: "video-b", instance: "inst-2", ms: 10_000 });
+      semer({ videoId: "video-c", instance: "inst-3", ms: 10_000 });
+      db.setVideoGenres("video-a", ["Pop music", "Jazz"]);
+      db.setVideoGenres("video-b", ["Pop music"]);
+
+      expect(db.listTopGenres(user, 10)).toMatchObject({ coveredPlays: 2, distinctCount: 2 });
+    });
+
+    /*
+     * Une seule colonne abimee ne doit pas eteindre l ecran entier. `parseGenres` est
+     * deja tolerante cote lecture de ligne; la lecture agregee passe par SQLite, qui
+     * leve « malformed JSON » sur la premiere valeur illisible sans garde.
+     */
+    it("survit a une colonne de genres illisible", () => {
+      const path = tempDbPath();
+      const db = openDatabase(path);
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      semer({ videoId: "video-a", ms: 10_000 });
+      semer({ videoId: "video-abimee", instance: "inst-2", ms: 10_000 });
+      db.setVideoGenres("video-a", ["Pop music"]);
+      db.close();
+
+      const raw = new DatabaseSync(path);
+      raw.prepare("UPDATE history_entries SET genres = ? WHERE video_id = ?")
+        .run("pas du json", "video-abimee");
+      raw.close();
+
+      const reopened = openDatabase(path);
+      const genres = reopened.listTopGenres(user, 10);
+      reopened.close();
+      expect(genres).toEqual({
+        entries: [{ genre: "Pop music", trackCount: 1 }], coveredPlays: 1, distinctCount: 1,
+      });
+    });
+  });
+
+  describe("seances (R8, AE6)", () => {
+    it("groupe deux morceaux d une meme instance en une seance, deux instances en deux (AE6)", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      semer({ videoId: "video-a", instance: "inst-1" });
+      semer({ videoId: "video-b", instance: "inst-1" });
+      expect(db.listSessions(user, 10)).toHaveLength(1);
+
+      const autre = db.upsertUser({ googleSub: "sub-ami", name: "Ami", email: null }, T0).id;
+      const semerAutre = semeur(db, autre);
+      semerAutre({ videoId: "video-a", instance: "inst-7" });
+      semerAutre({ videoId: "video-b", instance: "inst-8" });
+      expect(db.listSessions(autre, 10)).toHaveLength(2);
+    });
+
+    it("porte ses morceaux dans l ordre de lecture, son compte et sa duree totale (R8)", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      semer({ videoId: "video-a", at: T0, ms: 30_000 });
+      semer({ videoId: "video-b", at: T0 + 60_000, ms: 20_000 });
+      semer({ videoId: "video-c", at: T0 + 120_000, ms: 10_000 });
+
+      const [seance] = db.listSessions(user, 10);
+      expect(seance).toMatchObject({
+        roomInstanceId: "inst-1", startedAt: T0, trackCount: 3, listenedMs: 60_000,
+      });
+      expect(seance?.tracks.map((t) => t.videoId)).toEqual(["video-a", "video-b", "video-c"]);
+    });
+
+    it("porte une duree totale egale a la somme de ses lignes mesurees quand l une manque", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      semer({ videoId: "video-a", at: T0, ms: 30_000 });
+      semer({ videoId: "video-b", at: T0 + 60_000 });
+      semer({ videoId: "video-c", at: T0 + 120_000, ms: 10_000 });
+
+      expect(db.listSessions(user, 10)[0]).toMatchObject({ trackCount: 3, listenedMs: 40_000 });
+    });
+
+    it("rend la plus recente en premier", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      semer({ instance: "inst-ancienne", at: T0 });
+      semer({ instance: "inst-recente", at: T0 + JOUR });
+
+      expect(db.listSessions(user, 10).map((s) => s.roomInstanceId))
+        .toEqual(["inst-recente", "inst-ancienne"]);
+    });
+
+    it("distingue deux seances du meme jour par leur heure de debut", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      semer({ instance: "inst-midi", at: T0 });
+      semer({ instance: "inst-soir", at: T0 + 8 * 60 * 60 * 1000 });
+
+      expect(db.listSessions(user, 10).map((s) => s.startedAt))
+        .toEqual([T0 + 8 * 60 * 60 * 1000, T0]);
+    });
+
+    /*
+     * Une seance a cheval sur minuit garde la date de son premier morceau: sinon la
+     * soiree du vendredi se lirait « samedi » des que le dernier morceau passe minuit.
+     */
+    it("porte la date de son premier morceau meme a cheval sur minuit", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const avantMinuit = Date.UTC(2026, 8, 4, 23, 40);
+      const semer = semeur(db, user);
+      semer({ videoId: "video-a", at: avantMinuit });
+      semer({ videoId: "video-b", at: avantMinuit + 40 * 60 * 1000 });
+
+      expect(db.listSessions(user, 10)[0]).toMatchObject({ startedAt: avantMinuit, trackCount: 2 });
+    });
+
+    /*
+     * KTD8: le curseur porte sur la seance, jamais sur la ligne. Un curseur de ligne
+     * couperait une seance en deux entre deux pages, et son compte de morceaux comme
+     * sa duree seraient faux des deux cotes.
+     */
+    it("pagine par seance sans jamais en couper une en deux", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      for (const [index, instance] of ["inst-1", "inst-2", "inst-3"].entries()) {
+        semer({ videoId: "video-a", instance, at: T0 + index * JOUR });
+        semer({ videoId: "video-b", instance, at: T0 + index * JOUR + 60_000 });
+      }
+
+      const premiere = db.listSessions(user, 2);
+      expect(premiere.map((s) => s.roomInstanceId)).toEqual(["inst-3", "inst-2"]);
+      expect(premiere.map((s) => s.tracks.length)).toEqual([2, 2]);
+
+      const derniere = premiere[premiere.length - 1]!;
+      const suivante = db.listSessions(user, 2, {
+        startedAt: derniere.startedAt, roomInstanceId: derniere.roomInstanceId,
+      });
+      expect(suivante.map((s) => s.roomInstanceId)).toEqual(["inst-1"]);
+      expect(suivante[0]?.tracks).toHaveLength(2);
+    });
+
+    /*
+     * L instance departe deux seances qui commencent a la milliseconde pres, faute de
+     * quoi le curseur n aurait pas d ordre total a suivre et rendrait deux fois la
+     * meme seance, ou en sauterait une.
+     */
+    it("continue apres un curseur meme entre deux seances de meme heure de debut", () => {
+      const db = fresh();
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      for (const instance of ["inst-a", "inst-b", "inst-c"]) semer({ instance, at: T0 });
+
+      const premiere = db.listSessions(user, 2);
+      expect(premiere.map((s) => s.roomInstanceId)).toEqual(["inst-c", "inst-b"]);
+
+      const derniere = premiere[premiere.length - 1]!;
+      expect(db.listSessions(user, 2, {
+        startedAt: derniere.startedAt, roomInstanceId: derniere.roomInstanceId,
+      }).map((s) => s.roomInstanceId)).toEqual(["inst-a"]);
+    });
+
+    it("rend une liste vide pour un compte sans aucune ecoute", () => {
+      const db = fresh();
+      expect(db.listSessions(withUser(db), 10)).toEqual([]);
+    });
+
+    /*
+     * Les lignes d avant la migration 2 dont la cle ne portait pas de separateur sont
+     * restees sans instance. Sans identite de seance, une telle ligne ne peut ni etre
+     * placee dans une seance ni servir de curseur: elle reste hors du regroupement,
+     * et le compteur de seances l ignore de la meme facon.
+     */
+    it("laisse hors des seances une ligne sans instance", () => {
+      const path = tempDbPath();
+      const db = openDatabase(path);
+      const user = withUser(db);
+      const semer = semeur(db, user);
+      semer({ videoId: "video-a", instance: "inst-1" });
+      semer({ videoId: "video-orpheline", instance: "inst-2" });
+      db.close();
+
+      const raw = new DatabaseSync(path);
+      raw.prepare("UPDATE history_entries SET room_instance_id = NULL WHERE video_id = ?")
+        .run("video-orpheline");
+      raw.close();
+
+      const reopened = openDatabase(path);
+      const seances = reopened.listSessions(user, 10);
+      const totals = reopened.readListeningTotals(user);
+      reopened.close();
+      expect(seances.map((s) => s.roomInstanceId)).toEqual(["inst-1"]);
+      expect(totals).toMatchObject({ trackCount: 2, sessionCount: 1 });
+    });
+  });
+
+  /*
+   * La seule garde de vie privee de cet ecran: aucune de ces colonnes n est protegee
+   * ailleurs. Les deux comptes partagent tout ce qui pourrait servir de jointure — la
+   * meme video, la meme instance de room, les memes genres, les genres etant ecrits
+   * pour tous les comptes a la fois (U6). Les lignes de l ami sont les plus recentes
+   * et les plus longues: une requete oubliant le compte les ferait donc gagner partout,
+   * y compris sur le titre « le plus recent non nul ».
+   */
+  it("ne laisse jamais un compte voir les lignes d un autre", () => {
+    const db = fresh();
+    const leo = withUser(db);
+    const ami = db.upsertUser({ googleSub: "sub-ami", name: "Ami", email: null }, T0).id;
+    const PARTAGEE = { videoId: "video-partagee", instance: "inst-1" };
+    semeur(db, leo)({
+      ...PARTAGEE, title: "Titre vu par Leo", channelTitle: "Daft Punk",
+      thumbnailUrl: "https://img/leo.jpg", at: T0, ms: 30_000,
+    });
+    const semerAmi = semeur(db, ami);
+    semerAmi({
+      ...PARTAGEE, title: "Titre vu par Ami", channelTitle: "Justice",
+      thumbnailUrl: "https://img/ami.jpg", at: T0 + 10 * JOUR, ms: 90_000,
+    });
+    semerAmi({ ...PARTAGEE, channelTitle: "Justice", at: T0 + 11 * JOUR, ms: 90_000 });
+    semerAmi({ ...PARTAGEE, instance: "inst-2", channelTitle: "Justice", at: T0 + 12 * JOUR, ms: 90_000 });
+    db.setVideoGenres("video-partagee", ["Jazz"]);
+
+    expect(db.readListeningTotals(leo)).toEqual({
+      listenedMs: 30_000, timedTrackCount: 1, trackCount: 1, sessionCount: 1,
+    });
+    expect(db.listTopTracks(leo, 10)).toEqual({
+      entries: [{
+        videoId: "video-partagee",
+        title: "Titre vu par Leo",
+        channelTitle: "Daft Punk",
+        thumbnailUrl: "https://img/leo.jpg",
+        listenedMs: 30_000,
+        playCount: 1,
+      }],
+      coveredPlays: 1,
+      distinctCount: 1,
+    });
+    expect(db.listTopArtists(leo, 10)).toEqual({
+      entries: [{ channelTitle: "Daft Punk", listenedMs: 30_000, playCount: 1 }],
+      coveredPlays: 1,
+      distinctCount: 1,
+    });
+    expect(db.listTopGenres(leo, 10)).toEqual({
+      entries: [{ genre: "Jazz", trackCount: 1 }], coveredPlays: 1, distinctCount: 1,
+    });
+    const seances = db.listSessions(leo, 10);
+    expect(seances.map((s) => s.roomInstanceId)).toEqual(["inst-1"]);
+    expect(seances[0]).toMatchObject({ trackCount: 1, listenedMs: 30_000 });
+    expect(seances[0]?.tracks.map((t) => t.title)).toEqual(["Titre vu par Leo"]);
+  });
+});
+
 describe("playlists", () => {
   it("cree une playlist et la liste avec son nombre de morceaux", () => {
     const db = fresh();

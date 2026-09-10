@@ -160,6 +160,81 @@ export interface HistoryCursor {
   id: number;
 }
 
+/** Compteurs cumules de l ecran de statistiques (U7, R6). */
+export interface ListeningTotals {
+  /** Somme des durees connues. Les lignes sans duree n y entrent pas (R9). */
+  listenedMs: number;
+  /*
+   * Combien de lignes portent une duree. C est ce qui permet a l ecran de dire sur
+   * quoi son total porte plutot que de le presenter comme celui de tout l historique
+   * (R9): une base ou rien n est mesure doit pouvoir se taire au lieu d afficher zero.
+   */
+  timedTrackCount: number;
+  /** Toutes les ecoutes, mesurees ou non: une meme video ajoutee deux fois compte deux. */
+  trackCount: number;
+  sessionCount: number;
+}
+
+/*
+ * Un classement et ce sur quoi il porte (U7, R9). Les deux nombres accompagnent
+ * toujours les entrees: le seuil au-dela duquel un classement a le droit de s appeler
+ * « top » appartient a l ecran, qui ne peut trancher que s il sait sur combien
+ * d ecoutes et sur combien d entrees distinctes le classement repose.
+ */
+export interface Ranking<Entry> {
+  /** Les meilleures entrees, bornees par la limite demandee. */
+  entries: Entry[];
+  /** Ecoutes reellement classees: ni les lignes sans duree ni celles sans etiquette. */
+  coveredPlays: number;
+  /** Entrees distinctes classees, y compris celles que la limite a laissees dehors. */
+  distinctCount: number;
+}
+
+export interface TopTrack {
+  videoId: string;
+  /** Les plus recents non nuls parmi les lignes de cette video (Assumption U7). */
+  title: string | null;
+  channelTitle: string | null;
+  thumbnailUrl: string | null;
+  listenedMs: number;
+  playCount: number;
+}
+
+export interface TopArtist {
+  /** Le nom de la chaine YouTube tient lieu d artiste (R2). */
+  channelTitle: string;
+  listenedMs: number;
+  playCount: number;
+}
+
+export interface TopGenre {
+  genre: string;
+  /** Nombre d ecoutes portant ce genre. Un morceau compte dans chacun des siens (R12). */
+  trackCount: number;
+}
+
+/** Une soiree d ecoute, groupee par instance de room (R8, KTD4). */
+export interface ListeningSession {
+  roomInstanceId: string;
+  /** Date et heure du premier morceau (Assumption U7). */
+  startedAt: number;
+  trackCount: number;
+  /** Somme des durees connues de ses lignes; les autres n y ajoutent rien. */
+  listenedMs: number;
+  /** Ses morceaux, dans l ordre ou ils ont ete joues (R8). */
+  tracks: HistoryEntry[];
+}
+
+/*
+ * Curseur de pagination des seances (U7, KTD8): il porte sur la seance, jamais sur la
+ * ligne. Un curseur de ligne couperait une seance entre deux pages, et son nombre de
+ * morceaux comme sa duree seraient faux des deux cotes.
+ */
+export interface SessionCursor {
+  startedAt: number;
+  roomInstanceId: string;
+}
+
 export interface Playlist {
   id: number;
   name: string;
@@ -219,6 +294,29 @@ function parseGenres(raw: unknown): string[] | null {
   } catch {
     return null;
   }
+}
+
+/*
+ * `LIMIT` recoit une valeur de la route, pas de la base: on la ramene a un entier
+ * positif plutot que de la lier telle quelle. Meme geste que `listVideoIdsWithoutGenres`.
+ */
+function boundLimit(limit: number): number {
+  return Math.max(0, Math.trunc(limit));
+}
+
+/*
+ * Ce sur quoi un classement porte (U7, R9). Les deux nombres se lisent de la meme
+ * facon pour les trois classements, d ou un seul mappage: c est ce couple, pas le
+ * seuil qui en decoule, qui appartient a la base.
+ */
+function toCoverage(row: Record<string, unknown> | undefined): {
+  coveredPlays: number;
+  distinctCount: number;
+} {
+  return {
+    coveredPlays: Number(row?.["covered_plays"] ?? 0),
+    distinctCount: Number(row?.["distinct_count"] ?? 0),
+  };
 }
 
 function migrate(db: DatabaseSync): void {
@@ -348,6 +446,154 @@ export function openDatabase(path: string) {
       LIMIT ?
     `),
     setVideoGenres: db.prepare("UPDATE history_entries SET genres = ? WHERE video_id = ?"),
+
+    /*
+     * Lectures agregees de l ecran de statistiques (U7). Toutes portent `user_id = ?`:
+     * c est la seule garde de vie privee de cet ecran, aucune de ces colonnes n etant
+     * protegee ailleurs.
+     *
+     * `COUNT(listened_ms)` ignore les NULL, la ou `COUNT(*)` les compte: la difference
+     * entre les deux est exactement ce que R9 demande de savoir. `COUNT(DISTINCT
+     * room_instance_id)` ignore de meme les lignes d avant la migration 2 restees sans
+     * instance, qui ne forment aucune seance.
+     */
+    listeningTotals: db.prepare(`
+      SELECT COUNT(*)                     AS track_count,
+             COUNT(listened_ms)           AS timed_track_count,
+             COALESCE(SUM(listened_ms), 0) AS total_ms,
+             COUNT(DISTINCT room_instance_id) AS session_count
+      FROM history_entries
+      WHERE user_id = ?
+    `),
+
+    /*
+     * Classement des morceaux par temps cumule (R7, KTD10). Une ligne sans duree en
+     * est exclue: la garder la ferait peser zero seconde tout en gonflant la couverture
+     * que le classement annonce.
+     *
+     * Titre, chaine et miniature viennent de sous-requetes plutot que d un `MAX`: on
+     * veut la valeur la plus recente *non nulle*, une ligne ecrite avant la reponse
+     * oEmbed pouvant etre la plus recente tout en n en portant aucune (Assumption U7).
+     * Elles rescopent `user_id`, sans quoi le titre d un autre compte remonterait ici.
+     *
+     * `MAX(h.id) DESC` departe une egalite de temps: le meme ordre que l index
+     * d historique, et surtout le meme d un appel a l autre.
+     */
+    topTracks: db.prepare(`
+      SELECT h.video_id,
+             SUM(h.listened_ms) AS total_ms,
+             COUNT(*)           AS play_count,
+             (SELECT t.title FROM history_entries t
+               WHERE t.user_id = ? AND t.video_id = h.video_id AND t.title IS NOT NULL
+               ORDER BY t.played_at DESC, t.id DESC LIMIT 1) AS title,
+             (SELECT t.channel_title FROM history_entries t
+               WHERE t.user_id = ? AND t.video_id = h.video_id AND t.channel_title IS NOT NULL
+               ORDER BY t.played_at DESC, t.id DESC LIMIT 1) AS channel_title,
+             (SELECT t.thumbnail_url FROM history_entries t
+               WHERE t.user_id = ? AND t.video_id = h.video_id AND t.thumbnail_url IS NOT NULL
+               ORDER BY t.played_at DESC, t.id DESC LIMIT 1) AS thumbnail_url
+      FROM history_entries h
+      WHERE h.user_id = ? AND h.listened_ms IS NOT NULL
+      GROUP BY h.video_id
+      ORDER BY total_ms DESC, MAX(h.id) DESC
+      LIMIT ?
+    `),
+    topTracksCoverage: db.prepare(`
+      SELECT COUNT(*) AS covered_plays, COUNT(DISTINCT video_id) AS distinct_count
+      FROM history_entries
+      WHERE user_id = ? AND listened_ms IS NOT NULL
+    `),
+
+    /* Meme regle qu au-dessus, plus l exclusion des lignes sans artiste (AE9). */
+    topArtists: db.prepare(`
+      SELECT channel_title,
+             SUM(listened_ms) AS total_ms,
+             COUNT(*)         AS play_count
+      FROM history_entries
+      WHERE user_id = ? AND listened_ms IS NOT NULL AND channel_title IS NOT NULL
+      GROUP BY channel_title
+      ORDER BY total_ms DESC, MAX(id) DESC
+      LIMIT ?
+    `),
+    topArtistsCoverage: db.prepare(`
+      SELECT COUNT(*) AS covered_plays, COUNT(DISTINCT channel_title) AS distinct_count
+      FROM history_entries
+      WHERE user_id = ? AND listened_ms IS NOT NULL AND channel_title IS NOT NULL
+    `),
+
+    /*
+     * Classement des genres (R12, KTD10, KTD12). Il compte des morceaux, pas du temps:
+     * une ligne sans duree y compte donc pleinement, contrairement aux deux classements
+     * au-dessus. Un morceau porte plusieurs genres et compte dans chacun, d ou le
+     * parcours du tableau JSON par `json_each`.
+     *
+     * Le filtrage passe par une sous-requete, pas par le WHERE exterieur: `json_each`
+     * recoit sa valeur avant que le WHERE ne s applique, et une seule colonne abimee
+     * ferait alors echouer la requete entiere par « malformed JSON ». `json_valid` la
+     * laisse dehors, comme `parseGenres` la relit en « jamais interrogee ».
+     *
+     * Une etiquette n a pas d identifiant a departager: l ordre alphabetique en tient
+     * lieu (KTD10). Collation binaire, donc totale et stable, la ou NOCASE laisserait
+     * deux etiquettes qui ne different que par la casse a egalite.
+     */
+    topGenres: db.prepare(`
+      SELECT g.value AS genre, COUNT(*) AS track_count
+      FROM (SELECT genres FROM history_entries
+            WHERE user_id = ? AND genres IS NOT NULL AND json_valid(genres)) v,
+           json_each(v.genres) g
+      GROUP BY g.value
+      ORDER BY track_count DESC, genre ASC
+      LIMIT ?
+    `),
+    topGenresCoverage: db.prepare(`
+      SELECT COUNT(DISTINCT v.id) AS covered_plays, COUNT(DISTINCT g.value) AS distinct_count
+      FROM (SELECT id, genres FROM history_entries
+            WHERE user_id = ? AND genres IS NOT NULL AND json_valid(genres)) v,
+           json_each(v.genres) g
+    `),
+
+    /*
+     * Seances, de la plus recente a la plus ancienne (R8). Le regroupement est la
+     * colonne d instance (KTD4), l heure de debut le premier morceau: c est elle qui
+     * separe deux soirees du meme jour et qui garde sa date a une soiree passant
+     * minuit. Une ligne sans instance n a aucune identite de seance et reste dehors.
+     *
+     * L instance departe deux seances de meme debut, pour que le curseur ait toujours
+     * un ordre total a suivre.
+     */
+    sessionsPage: db.prepare(`
+      SELECT room_instance_id,
+             MIN(played_at)   AS started_at,
+             COUNT(*)         AS track_count,
+             COALESCE(SUM(listened_ms), 0) AS total_ms
+      FROM history_entries
+      WHERE user_id = ? AND room_instance_id IS NOT NULL
+      GROUP BY room_instance_id
+      ORDER BY started_at DESC, room_instance_id DESC
+      LIMIT ?
+    `),
+    sessionsPageAfter: db.prepare(`
+      SELECT room_instance_id,
+             MIN(played_at)   AS started_at,
+             COUNT(*)         AS track_count,
+             COALESCE(SUM(listened_ms), 0) AS total_ms
+      FROM history_entries
+      WHERE user_id = ? AND room_instance_id IS NOT NULL
+      GROUP BY room_instance_id
+      HAVING MIN(played_at) < ?
+          OR (MIN(played_at) = ? AND room_instance_id < ?)
+      ORDER BY started_at DESC, room_instance_id DESC
+      LIMIT ?
+    `),
+    /* Les morceaux d une seance, dans l ordre ou ils ont ete joues (R8). */
+    sessionTracks: db.prepare(`
+      SELECT id, video_id, title, played_at, listened_ms, channel_title, thumbnail_url,
+             genres, room_instance_id
+      FROM history_entries
+      WHERE user_id = ? AND room_instance_id = ?
+      ORDER BY played_at ASC, id ASC
+    `),
+
     countPlaylists: db.prepare("SELECT COUNT(*) AS n FROM playlists WHERE user_id = ?"),
     createPlaylist: db.prepare(
       "INSERT INTO playlists (user_id, name, created_at) VALUES (?, ?, ?) RETURNING id",
@@ -547,6 +793,90 @@ export function openDatabase(path: string) {
     setVideoGenres(videoId: string, genres: readonly string[]): number {
       const result = statements.setVideoGenres.run(JSON.stringify(genres), videoId);
       return Number(result.changes);
+    },
+
+    /** Compteurs cumules du compte (U7, R6). Zero partout quand rien n a ete ecoute. */
+    readListeningTotals(userId: number): ListeningTotals {
+      const row = statements.listeningTotals.get(userId);
+      return {
+        listenedMs: Number(row?.["total_ms"] ?? 0),
+        timedTrackCount: Number(row?.["timed_track_count"] ?? 0),
+        trackCount: Number(row?.["track_count"] ?? 0),
+        sessionCount: Number(row?.["session_count"] ?? 0),
+      };
+    },
+
+    /*
+     * Les morceaux les plus ecoutes, par temps cumule (U7, R7). `limit` borne les
+     * entrees rendues, jamais les nombres qui les accompagnent: l ecran doit savoir
+     * combien d entrees existent, pas seulement combien il en recoit (R9).
+     */
+    listTopTracks(userId: number, limit: number): Ranking<TopTrack> {
+      const rows = statements.topTracks.all(
+        userId, userId, userId, userId, boundLimit(limit),
+      );
+      return {
+        entries: rows.map((row) => ({
+          videoId: String(row["video_id"]),
+          title: row["title"] === null ? null : String(row["title"]),
+          channelTitle: row["channel_title"] === null ? null : String(row["channel_title"]),
+          thumbnailUrl: row["thumbnail_url"] === null ? null : String(row["thumbnail_url"]),
+          listenedMs: Number(row["total_ms"]),
+          playCount: Number(row["play_count"]),
+        })),
+        ...toCoverage(statements.topTracksCoverage.get(userId)),
+      };
+    },
+
+    /** Les artistes les plus ecoutes, par temps cumule (U7, R7, AE9). */
+    listTopArtists(userId: number, limit: number): Ranking<TopArtist> {
+      const rows = statements.topArtists.all(userId, boundLimit(limit));
+      return {
+        entries: rows.map((row) => ({
+          channelTitle: String(row["channel_title"]),
+          listenedMs: Number(row["total_ms"]),
+          playCount: Number(row["play_count"]),
+        })),
+        ...toCoverage(statements.topArtistsCoverage.get(userId)),
+      };
+    },
+
+    /*
+     * Les genres les plus ecoutes (U7, R12). Compte des morceaux, pas du temps: un
+     * morceau porte plusieurs genres et compte dans chacun, ce que l ecran doit dire.
+     */
+    listTopGenres(userId: number, limit: number): Ranking<TopGenre> {
+      const rows = statements.topGenres.all(userId, boundLimit(limit));
+      return {
+        entries: rows.map((row) => ({
+          genre: String(row["genre"]),
+          trackCount: Number(row["track_count"]),
+        })),
+        ...toCoverage(statements.topGenresCoverage.get(userId)),
+      };
+    },
+
+    /*
+     * Les seances, de la plus recente a la plus ancienne (U7, R8). `after` continue la
+     * page precedente par un curseur de seance: une seance sort donc toujours entiere,
+     * avec tous ses morceaux (KTD8).
+     */
+    listSessions(userId: number, limit: number, after?: SessionCursor): ListeningSession[] {
+      const rows = after
+        ? statements.sessionsPageAfter.all(
+            userId, after.startedAt, after.startedAt, after.roomInstanceId, boundLimit(limit),
+          )
+        : statements.sessionsPage.all(userId, boundLimit(limit));
+      return rows.map((row) => {
+        const roomInstanceId = String(row["room_instance_id"]);
+        return {
+          roomInstanceId,
+          startedAt: Number(row["started_at"]),
+          trackCount: Number(row["track_count"]),
+          listenedMs: Number(row["total_ms"]),
+          tracks: statements.sessionTracks.all(userId, roomInstanceId).map(toHistoryEntry),
+        };
+      });
     },
 
     createPlaylist(userId: number, name: string, nowMs: number): { ok: true; id: number } | Failure {
