@@ -19,8 +19,11 @@ import { DatabaseSync } from "node:sqlite";
  * qui manque en comparant a PRAGMA user_version, chaque script dans sa transaction.
  * Pas d outil externe a installer, et une base neuve comme une base en place suivent
  * exactement le meme chemin. Une migration livree ne se modifie plus: on en ajoute une.
+ *
+ * Exporte pour les tests, qui construisent une base d une version anterieure a partir
+ * de la migration livree plutot que d en recopier le schema, qui deriverait.
  */
-const MIGRATIONS: readonly string[] = [
+export const MIGRATIONS: readonly string[] = [
   `
   CREATE TABLE users (
     id              INTEGER PRIMARY KEY,
@@ -73,6 +76,40 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX playlist_items_by_playlist ON playlist_items(playlist_id, position);
   `,
+
+  /*
+   * Memoire des ecoutes (U2). Cinq colonnes nullables, jamais NOT NULL: un morceau
+   * dont l artiste, la miniature ou le genre n a pas pu etre recupere reste enregistre
+   * sans eux (R4), et les lignes deja en base n auront jamais de duree, celle-ci n
+   * etant reconstructible depuis rien.
+   */
+  `
+  -- Temps reellement joue dans la room, pauses exclues (R1). NULL tant qu aucune fin
+  -- de morceau n a ete mesuree: l ecran doit pouvoir distinguer « pas mesure » de zero.
+  ALTER TABLE history_entries ADD COLUMN listened_ms     INTEGER;
+  -- Le nom de la chaine YouTube tient lieu d artiste (R2), l adresse de miniature se
+  -- stocke bien qu elle se deduise de l identifiant (KTD7): une forme d URL peut
+  -- changer chez YouTube, et les lignes anciennes se retrouveraient sans image.
+  ALTER TABLE history_entries ADD COLUMN channel_title   TEXT;
+  ALTER TABLE history_entries ADD COLUMN thumbnail_url   TEXT;
+  -- Tableau JSON de chaines (KTD12): NULL signifie « jamais interrogee », un tableau
+  -- vide « interrogee, aucun genre ». Sans cette distinction, une video sans genre
+  -- serait redemandee a YouTube a chaque ouverture de l ecran.
+  ALTER TABLE history_entries ADD COLUMN genres          TEXT;
+  -- L instance de room, soit le prefixe de room_item_key (KTD4). Une colonne plutot
+  -- qu un decoupage de chaine a chaque lecture: le regroupement par seance devient
+  -- indexable, et le format de la cle cesse d etre recopie dans chaque requete.
+  ALTER TABLE history_entries ADD COLUMN room_instance_id TEXT;
+
+  -- Les lignes deja en base deviennent groupables par seance sans code de compatibilite
+  -- (KTD4). Une cle sans separateur, ou dont le prefixe serait vide, ne porte aucune
+  -- instance: elle reste a NULL plutot que d en inventer une.
+  UPDATE history_entries
+  SET room_instance_id = substr(room_item_key, 1, instr(room_item_key, '#') - 1)
+  WHERE instr(room_item_key, '#') > 1;
+
+  CREATE INDEX history_by_session ON history_entries(user_id, room_instance_id, played_at);
+  `,
 ];
 
 /*
@@ -106,6 +143,15 @@ export interface HistoryEntry {
   videoId: string;
   title: string | null;
   playedAt: number;
+  /** Temps joue dans la room, pauses exclues (R1). null quand rien n a ete mesure. */
+  listenedMs: number | null;
+  /** Le nom de la chaine YouTube tient lieu d artiste (R2). */
+  channelTitle: string | null;
+  thumbnailUrl: string | null;
+  /** null = jamais interrogee, [] = interrogee sans resultat (KTD12). */
+  genres: string[] | null;
+  /** La seance a laquelle l ecoute appartient (KTD4). */
+  roomInstanceId: string | null;
 }
 
 /** Curseur de pagination: la derniere entree affichee (KTD8, route GET /api/history). */
@@ -149,10 +195,41 @@ function fingerprint(rawId: string): string {
   return createHash("sha256").update(rawId).digest("hex");
 }
 
-/** Les titres viennent de YouTube, jamais d une saisie: on tronque au lieu de refuser. */
-function clampTitle(title: string | null): string | null {
-  if (title === null) return null;
-  return title.length > LIMITS.titleChars ? title.slice(0, LIMITS.titleChars) : title;
+/*
+ * Titre, nom de chaine et adresse de miniature viennent tous de YouTube, jamais d une
+ * saisie: on tronque au lieu de refuser. Un seul plafond pour les trois, aucun n ayant
+ * de longueur legitime au-dela.
+ */
+function clampText(text: string | null): string | null {
+  if (text === null) return null;
+  return text.length > LIMITS.titleChars ? text.slice(0, LIMITS.titleChars) : text;
+}
+
+/*
+ * L instance de room est le prefixe de la cle persistee, <instanceId>#<itemId> (KTD4).
+ * La regle vit ici, au meme endroit que le remplissage des lignes anciennes par la
+ * migration 2: une seule definition de ce qu est une seance. Une cle sans separateur,
+ * ou dont le prefixe serait vide, n en porte aucune.
+ */
+function roomInstanceOf(roomItemKey: string): string | null {
+  const cut = roomItemKey.indexOf("#");
+  return cut > 0 ? roomItemKey.slice(0, cut) : null;
+}
+
+/*
+ * La colonne des genres porte un tableau JSON de chaines (KTD12). Une valeur illisible
+ * se relit comme « jamais interrogee », ce qui la fait redemander plus tard: un ecran
+ * de statistiques ne doit pas tomber sur une seule ligne abimee.
+ */
+function parseGenres(raw: unknown): string[] | null {
+  if (typeof raw !== "string") return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    return parsed.filter((genre): genre is string => typeof genre === "string");
+  } catch {
+    return null;
+  }
 }
 
 function migrate(db: DatabaseSync): void {
@@ -226,15 +303,20 @@ export function openDatabase(path: string) {
     deleteSession: db.prepare("DELETE FROM sessions WHERE id = ?"),
     deleteExpiredSessions: db.prepare("DELETE FROM sessions WHERE expires_at <= ? OR hard_expires_at <= ?"),
     recordListen: db.prepare(`
-      INSERT OR IGNORE INTO history_entries (user_id, video_id, title, played_at, room_item_key)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT OR IGNORE INTO history_entries
+        (user_id, video_id, title, channel_title, thumbnail_url, played_at, room_item_key, room_instance_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `),
     historyPage: db.prepare(`
-      SELECT id, video_id, title, played_at FROM history_entries
+      SELECT id, video_id, title, played_at, listened_ms, channel_title, thumbnail_url,
+             genres, room_instance_id
+      FROM history_entries
       WHERE user_id = ? ORDER BY played_at DESC, id DESC LIMIT ?
     `),
     historyPageAfter: db.prepare(`
-      SELECT id, video_id, title, played_at FROM history_entries
+      SELECT id, video_id, title, played_at, listened_ms, channel_title, thumbnail_url,
+             genres, room_instance_id
+      FROM history_entries
       WHERE user_id = ? AND (played_at < ? OR (played_at = ? AND id < ?))
       ORDER BY played_at DESC, id DESC LIMIT ?
     `),
@@ -276,6 +358,11 @@ export function openDatabase(path: string) {
       videoId: String(row["video_id"]),
       title: row["title"] === null ? null : String(row["title"]),
       playedAt: Number(row["played_at"]),
+      listenedMs: row["listened_ms"] === null ? null : Number(row["listened_ms"]),
+      channelTitle: row["channel_title"] === null ? null : String(row["channel_title"]),
+      thumbnailUrl: row["thumbnail_url"] === null ? null : String(row["thumbnail_url"]),
+      genres: parseGenres(row["genres"]),
+      roomInstanceId: row["room_instance_id"] === null ? null : String(row["room_instance_id"]),
     };
   }
 
@@ -336,11 +423,29 @@ export function openDatabase(path: string) {
      * Rend true si l entree est nouvelle.
      */
     recordListen(
-      entry: { userId: number; videoId: string; title: string | null; roomItemKey: string },
+      entry: {
+        userId: number;
+        videoId: string;
+        title: string | null;
+        roomItemKey: string;
+        /*
+         * Optionnels: oEmbed repond en fire-and-forget et peut arriver apres le depart
+         * commun. Le morceau s enregistre quand meme, sans artiste ni miniature (R4).
+         */
+        channelTitle?: string | null;
+        thumbnailUrl?: string | null;
+      },
       nowMs: number,
     ): boolean {
       const result = statements.recordListen.run(
-        entry.userId, entry.videoId, clampTitle(entry.title), nowMs, entry.roomItemKey,
+        entry.userId,
+        entry.videoId,
+        clampText(entry.title),
+        clampText(entry.channelTitle ?? null),
+        clampText(entry.thumbnailUrl ?? null),
+        nowMs,
+        entry.roomItemKey,
+        roomInstanceOf(entry.roomItemKey),
       );
       return Number(result.changes) > 0;
     },
@@ -406,7 +511,7 @@ export function openDatabase(path: string) {
       }
       const position = Number(row?.["next"] ?? 0);
       statements.addPlaylistItem.run(
-        playlistId, item.videoId, clampTitle(item.title), position, nowMs,
+        playlistId, item.videoId, clampText(item.title), position, nowMs,
       );
       return { ok: true, position };
     },
