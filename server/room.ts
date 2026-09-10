@@ -69,6 +69,17 @@ export function createRoom(code: string, config: RoomConfig) {
    * pas positionner un arrivant: la timeline ne vivrait que chez les clients deja la.
    */
   let timeline: { positionMs: number; startAtServerMs: number } | null = null;
+  /*
+   * Instant du dernier depart, quel qu il soit (U5, KTD2). C est l ancre de la duree
+   * ecrite a la destruction de la room: la timeline continue de courir pendant le
+   * delai de grace puis jusqu au balayage suivant, soit jusqu a quarante secondes de
+   * silence qui se compteraient comme de l ecoute.
+   *
+   * Il ne peut pas se deriver de `presence`: `leave` supprime l entree sans laisser
+   * de marque, et quand l un perd sa socket pendant que l autre part volontairement,
+   * la marque de deconnexion la plus recente est celle du mauvais participant.
+   */
+  let lastDepartureAtMs: number | null = null;
 
   function positionAt(nowMs: number): number {
     if (timeline === null) return 0;
@@ -164,6 +175,7 @@ export function createRoom(code: string, config: RoomConfig) {
       if (!p) return;
       p.connected = false;
       p.disconnectedAt = nowMs;
+      lastDepartureAtMs = nowMs;
     },
 
     /*
@@ -175,6 +187,7 @@ export function createRoom(code: string, config: RoomConfig) {
      */
     leave(participantId: string, nowMs: number): BarrierOutcome {
       if (!presence.has(participantId)) return { kind: "ignored" };
+      lastDepartureAtMs = nowMs;
       presence.delete(participantId);
       positions.delete(participantId);
       barrier.removeParticipant(participantId);
@@ -201,6 +214,24 @@ export function createRoom(code: string, config: RoomConfig) {
       if (presence.size === 0) return true;
       for (const p of presence.values()) if (!expired(p, nowMs)) return false;
       return true;
+    },
+
+    /*
+     * Le morceau courant, mesure a l instant du dernier depart (U5, R5, KTD2). Ce que
+     * le balayage doit ecrire pour qu une soiree abandonnee en pleine lecture ne perde
+     * pas son dernier morceau, l appelant ecrivant comme toujours (KTD9).
+     *
+     * L instant vient de la room, il ne se passe pas en parametre: le prendre du
+     * dehors, c est rouvrir le defaut meme que KTD2 ferme, l appelant n ayant sous la
+     * main que l instant du balayage. Mesure attendue: depart a 20 000 ms, balayage a
+     * 60 000 ms.
+     *
+     * Lecture seule, et il le faut: la destruction n appelle aucun `control`, donc
+     * rien ne mute ici et deux lectures rendent la meme duree.
+     */
+    finalSegment(): PlayedSegment | null {
+      if (lastDepartureAtMs === null) return null;
+      return playedSegment(lastDepartureAtMs);
     },
 
     queueAdd(participantId: string, videoId: string, nowMs: number):

@@ -693,7 +693,19 @@ setInterval(() => {
 
 setInterval(() => {
   const now = Date.now();
-  registry.sweep(now);
+  /*
+   * Rattrapage du dernier morceau d une soiree abandonnee en pleine lecture (U5, R5).
+   * Le balayage est la derniere occasion de l ecrire: la room vient d etre sortie du
+   * registre et son instance ne se retrouve plus par le code, d ou le point d accroche.
+   *
+   * La duree se lit a l instant du dernier depart, que la room tient elle-meme, pas a
+   * maintenant (KTD2): entre les deux il y a le delai de grace puis l attente du
+   * balayage, soit jusqu a quarante secondes de silence.
+   */
+  for (const destroyed of registry.sweep(now)) {
+    const played = destroyed.room.finalSegment();
+    if (played) recordPlayedSegment({ db, instanceId: destroyed.instanceId, played });
+  }
   searchBudget.sweep(now);
 }, SWEEP_MS);
 
