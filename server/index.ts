@@ -13,6 +13,7 @@ import { z } from "zod";
 import { parseClientMessage, PSEUDO_MAX_CHARS, VideoId, type ServerMessage } from "../shared/protocol";
 import { createRegistry, type Room } from "./roomRegistry";
 import { fetchEachVideoInfo } from "./videoInfo";
+import { createCoalescer } from "./coalesce";
 import { createStaticHandler } from "./static";
 import { searchVideos } from "./youtubeSearch";
 import { createSearchBudget } from "./searchBudget";
@@ -35,6 +36,12 @@ const CONFIG = {
 /** Cadence de rediffusion des positions: celle de la boucle client (mesure du 19/08). */
 const BROADCAST_MS = 1_000;
 const SWEEP_MS = 10_000;
+/*
+ * Fenetre de regroupement des diffusions quand les artistes arrivent d oEmbed. Assez
+ * courte pour que la file se remplisse a vue d oeil, assez longue pour qu un envoi de
+ * playlist ne diffuse pas la file entiere une fois par morceau.
+ */
+const QUEUE_INFO_BROADCAST_MS = 250;
 
 interface Session {
   participantId: string;
@@ -407,6 +414,21 @@ async function handleApi(request: IncomingMessage, response: ServerResponse): Pr
  * reponse, elle peut avoir disparu pendant l attente.
  */
 function fillQueueInfo(code: string, entries: Array<{ itemId: string; videoId: string }>): void {
+  /*
+   * Les diffusions se regroupent au lieu d en faire une par reponse. Un envoi de
+   * playlist porte jusqu a cent morceaux, et chaque diffusion reserialise la file
+   * entiere vers les deux sockets: une par reponse, c est cent diffusions d une file
+   * qui grandit, pour un artiste a jour sur une seule ligne a chaque fois.
+   *
+   * Le regroupement par cadence fixe est le meme motif que la boucle de positions.
+   * Un ajout un par un n y perd rien: le `finally` vide l attente aussitot, donc sa
+   * reponse unique se diffuse sans delai.
+   */
+  const diffusion = createCoalescer(() => {
+    const room = registry.get(code);
+    if (room !== undefined) broadcastState(code, room);
+  }, QUEUE_INFO_BROADCAST_MS);
+
   void fetchEachVideoInfo(entries.map((e) => e.videoId), (index, outcome) => {
     const entry = entries[index];
     const room = registry.get(code);
@@ -416,8 +438,8 @@ function fillQueueInfo(code: string, entries: Array<{ itemId: string; videoId: s
       // Une panne ne marque rien: le morceau s enregistrera sans artiste (R4). Seul
       // un refus de YouTube le tient hors de l historique (R14).
       : outcome.reason === "refused" && room.markRefused(entry.itemId);
-    if (changed) broadcastState(code, room);
-  });
+    if (changed) diffusion.request();
+  }).finally(() => diffusion.flush());
 }
 
 /*

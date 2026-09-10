@@ -4,6 +4,7 @@ import { recordCommonStart, recordPlayedSegment } from "./history";
 import { createRoom, type RoomSnapshot } from "./room";
 import { createRegistry } from "./roomRegistry";
 import { fetchEachVideoInfo } from "./videoInfo";
+import { mockFetch, restoreFetchAfterEach, jsonOk as oembed } from "./mockFetch";
 
 const T0 = 1_700_000_000_000;
 
@@ -28,15 +29,7 @@ function snapshot(over: Partial<RoomSnapshot> = {}): RoomSnapshot {
   };
 }
 
-const realFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = realFetch; vi.restoreAllMocks(); });
-
-function mockFetch(impl: (...args: unknown[]) => Promise<Response>) {
-  globalThis.fetch = vi.fn(impl) as unknown as typeof fetch;
-}
-
-const oembed = (body: unknown) =>
-  Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+restoreFetchAfterEach();
 
 /*
  * Le meme raccordement que le transport (server/index.ts): oEmbed rend, la room pose,

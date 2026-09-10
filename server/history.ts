@@ -14,6 +14,16 @@
 import type { Db, User } from "./db";
 import type { PlayedSegment, RoomSnapshot } from "./room";
 
+/*
+ * Le format de la cle persistee, defini une seule fois (KTD4). Deux fonctions de ce
+ * module l ecrivent: le changer dans l une sans l autre romprait le rapprochement
+ * entre la ligne creee au depart commun et la duree qui s y ajoute, en silence et
+ * sans qu aucun typecheck le voie.
+ */
+function roomItemKey(instanceId: string, itemId: string): string {
+  return `${instanceId}#${itemId}`;
+}
+
 export function recordCommonStart(args: {
   db: Db;
   /** L instance de room, jamais le code a quatre lettres, qui se recycle (KTD6). */
@@ -46,7 +56,7 @@ export function recordCommonStart(args: {
         title: item.title,
         channelTitle: item.channelTitle,
         thumbnailUrl: item.thumbnailUrl,
-        roomItemKey: `${args.instanceId}#${item.itemId}`,
+        roomItemKey: roomItemKey(args.instanceId, item.itemId),
         // L instance passe explicitement: c est ici qu on construit la cle, donc le
         // seul endroit qui doive connaitre son format (KTD4).
         roomInstanceId: args.instanceId,
@@ -77,7 +87,7 @@ export function recordPlayedSegment(args: {
 }): void {
   const { item } = args.played;
   args.db.addListenedMs({
-    roomItemKey: `${args.instanceId}#${item.itemId}`,
+    roomItemKey: roomItemKey(args.instanceId, item.itemId),
     listenedMs: args.played.listenedMs,
     // Rattrapage d une reponse oEmbed arrivee apres le depart commun: la file les
     // connait peut-etre maintenant, et la ligne est deja en ecriture.

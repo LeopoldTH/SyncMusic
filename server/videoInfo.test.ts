@@ -1,17 +1,8 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { fetchVideoInfo, fetchEachVideoInfo } from "./videoInfo";
+import { mockFetch, restoreFetchAfterEach, jsonOk as ok, httpStatus as status } from "./mockFetch";
 
-const realFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = realFetch; vi.restoreAllMocks(); });
-
-function mockFetch(impl: (...args: unknown[]) => Promise<Response>) {
-  globalThis.fetch = vi.fn(impl) as unknown as typeof fetch;
-}
-
-const ok = (body: unknown) =>
-  Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
-
-const status = (code: number) => () => Promise.resolve(new Response("", { status: code }));
+restoreFetchAfterEach();
 
 /** Laisse tourner les microtaches ET la file des timers: le pool en depend. */
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
