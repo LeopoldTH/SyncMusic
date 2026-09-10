@@ -15,9 +15,11 @@ import { aRejouer } from "./lib/replay";
 import { RoomJoin } from "./components/RoomJoin";
 import { AccountScreen } from "./components/AccountScreen";
 import { History } from "./components/History";
+import { Memoire } from "./components/Memoire";
 import { Playlists, SendPlaylist } from "./components/Playlists";
 import { fetchAccount, logout, saveAccountName, type Account } from "./lib/account";
 import { fetchHistory, type HistoryPage } from "./lib/history";
+import { ajouterPage, fetchStats, type Stats } from "./lib/memoire";
 import {
   addPlaylistItem, createPlaylist, fetchPlaylistItems, fetchPlaylists,
   type Playlist, type PlaylistItem,
@@ -64,6 +66,12 @@ export function App() {
   const [account, setAccount] = useState<Account | null | undefined>(undefined);
   /** Page d historique chargee, null tant que /api/history n a pas repondu. */
   const [history, setHistory] = useState<HistoryPage | null>(null);
+  /*
+   * Memoire des ecoutes, null tant que /api/stats n a pas repondu (U8). Cette attente
+   * est distincte de celle de l identite: sans elle, quelqu un qui a des seances
+   * verrait passer l invitation a ecouter entre l arrivee de son nom et ses chiffres.
+   */
+  const [stats, setStats] = useState<Stats | null>(null);
   const [playlists, setPlaylists] = useState<Playlist[] | null>(null);
   const [selectedPlaylist, setSelectedPlaylist] = useState<number | null>(null);
   const [playlistItems, setPlaylistItems] = useState<PlaylistItem[] | null>(null);
@@ -260,6 +268,18 @@ export function App() {
     if (path !== "/historique" && path !== "/playlists") return;
     setHistory(null);
     void fetchHistory().then(setHistory);
+  }, [path]);
+
+  /*
+   * La memoire se recharge a chaque visite de l ecran, comme l historique: une soiree
+   * vient peut-etre de s y ajouter. Le retour a null n est pas cosmetique (U8, R9):
+   * il remet l ecran en attente au lieu de laisser les chiffres de la visite
+   * precedente passer pour ceux d aujourd hui.
+   */
+  useEffect(() => {
+    if (path !== "/memoire") return;
+    setStats(null);
+    void fetchStats().then(setStats);
   }, [path]);
 
   // Les playlists servent deux ecrans: le leur, et la room pour l envoi (R9).
@@ -540,6 +560,33 @@ export function App() {
               entries: [...previous.entries, ...next.entries],
               nextBefore: next.nextBefore,
             });
+          });
+        }}
+      />
+    );
+  }
+
+  if (path === "/memoire") {
+    // Attendre la reponse d identite avant de monter l ecran: monte plus tot, il
+    // prendrait un invite pour quelqu un qui n a rien ecoute (U8, R9).
+    if (account === undefined) {
+      return (
+        <main className="join">
+          <h1>Ma mémoire</h1>
+          <p className="join__baseline">Un instant...</p>
+        </main>
+      );
+    }
+    return (
+      <Memoire
+        account={account}
+        stats={stats}
+        onMore={() => {
+          const cursor = stats?.sessions.nextBefore;
+          if (!cursor) return;
+          void fetchStats(cursor).then((next) => {
+            if (next === null) return;
+            setStats((previous) => previous === null ? next : ajouterPage(previous, next));
           });
         }}
       />
