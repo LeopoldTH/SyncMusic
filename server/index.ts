@@ -17,7 +17,11 @@ import { createCoalescer } from "./coalesce";
 import { createStaticHandler } from "./static";
 import { searchVideos } from "./youtubeSearch";
 import { createSearchBudget } from "./searchBudget";
-import { LIMITS, openDatabase, resolveDbPath, type HistoryCursor, type User } from "./db";
+import {
+  LIMITS, openDatabase, resolveDbPath,
+  type HistoryCursor, type SessionCursor, type User,
+} from "./db";
+import { fillMissingGenres } from "./videoTopics";
 import { createAuth, readAuthConfig, readBody, sameOrigin, sendJson } from "./auth";
 import { recordCommonStart, recordPlayedSegment } from "./history";
 import type { PlayedSegment } from "./room";
@@ -243,6 +247,29 @@ function parseHistoryCursor(raw: string | null): HistoryCursor | undefined {
   return { playedAt: Number(match[1]), id: Number(match[2]) };
 }
 
+/*
+ * Bornes de l ecran de statistiques (U7). Dix entrees par classement: assez pour un
+ * podium et sa suite, sans faire d une reponse d agregats une seconde page d historique.
+ *
+ * Les seances se paginent, chacune portant ses morceaux: vingt seances a une file de
+ * cent morceaux restent une reponse tenable, et une soiree en compte quelques dizaines.
+ */
+const TOP_ENTRIES = 10;
+const SESSIONS_PAGE = 20;
+
+/*
+ * Curseur `avant` des seances: `startedAt.instance` de la derniere seance affichee. Il
+ * porte sur la seance, jamais sur la ligne (KTD8): un curseur de ligne couperait une
+ * seance entre deux pages. L instance ne contient pas de point, le premier separe donc
+ * bien les deux moities.
+ */
+function parseSessionCursor(raw: string | null): SessionCursor | undefined {
+  if (raw === null) return undefined;
+  const match = /^(\d{1,15})\.([A-Za-z0-9_-]{1,64})$/.exec(raw);
+  if (!match) return undefined;
+  return { startedAt: Number(match[1]), roomInstanceId: match[2]! };
+}
+
 const PlaylistBody = z.object({
   name: z.string().trim().min(1, "choisis un nom de playlist")
     .max(LIMITS.playlistNameChars, "nom de playlist trop long"),
@@ -329,7 +356,10 @@ async function handleApi(request: IncomingMessage, response: ServerResponse): Pr
   }
 
   const itemsPath = /^\/api\/playlists\/(\d{1,9})\/items$/.exec(path);
-  if (path !== "/api/history" && path !== "/api/playlists" && itemsPath === null) return false;
+  if (
+    path !== "/api/history" && path !== "/api/stats" && path !== "/api/playlists"
+    && itemsPath === null
+  ) return false;
 
   // Meme regle que le routeur d auth: un POST venu d un autre site ne declenche rien.
   if (method === "POST" && !sameOrigin(request, authConfig)) {
@@ -356,6 +386,60 @@ async function handleApi(request: IncomingMessage, response: ServerResponse): Pr
       entries: entries.map((e) => ({ videoId: e.videoId, title: e.title, playedAt: e.playedAt })),
       nextBefore: entries.length === HISTORY_PAGE && last ? `${last.playedAt}.${last.id}` : null,
     });
+    return true;
+  }
+
+  /*
+   * Memoire des ecoutes (U7). Route neuve plutot qu un enrichissement de l historique:
+   * celui-ci pagine des lignes par curseur et couperait une seance en deux (KTD8). Son
+   * DTO se redeclare a la main cote client, comme celui du compte et des playlists.
+   *
+   * Ce qui accompagne chaque classement — sa couverture et son nombre d entrees
+   * distinctes — n est pas decoratif (R9): le seuil au-dela duquel un classement a le
+   * droit de s appeler « top » appartient a l ecran, qui ne peut trancher que s il sait
+   * sur quoi le classement repose. La route ne filtre donc rien pour lui.
+   */
+  if (path === "/api/stats" && method === "GET") {
+    const sessions = db.listSessions(
+      user.id, SESSIONS_PAGE, parseSessionCursor(url.searchParams.get("before")),
+    );
+    const last = sessions[sessions.length - 1];
+    sendJson(response, 200, {
+      totals: db.readListeningTotals(user.id),
+      topTracks: db.listTopTracks(user.id, TOP_ENTRIES),
+      topArtists: db.listTopArtists(user.id, TOP_ENTRIES),
+      topGenres: db.listTopGenres(user.id, TOP_ENTRIES),
+      sessions: {
+        entries: sessions.map((session) => ({
+          roomInstanceId: session.roomInstanceId,
+          startedAt: session.startedAt,
+          trackCount: session.trackCount,
+          listenedMs: session.listenedMs,
+          /* L instance de room n a de sens que comme identite de seance: elle est deja
+             portee par la seance, la repeter sur chacun de ses morceaux ne dit rien. */
+          tracks: session.tracks.map((track) => ({
+            videoId: track.videoId,
+            title: track.title,
+            channelTitle: track.channelTitle,
+            thumbnailUrl: track.thumbnailUrl,
+            genres: track.genres,
+            playedAt: track.playedAt,
+            listenedMs: track.listenedMs,
+          })),
+        })),
+        nextBefore: sessions.length === SESSIONS_PAGE && last
+          ? `${last.startedAt}.${last.roomInstanceId}`
+          : null,
+      },
+    });
+    /*
+     * Le rattrapage des genres se declenche ici, une fois la reponse partie (U6, R11):
+     * c est le seul moment ou quelqu un regarde ses ecoutes, donc le seul ou remplir a
+     * une valeur. Sans `await` et sans `catch`: la promesse ne porte rien et ne rejette
+     * pas, ce qui manque a ce passage revient au suivant. Sans cle, rien ne part et
+     * l application marche pareil, comme pour la recherche (R3).
+     */
+    if (YOUTUBE_API_KEY !== null) void fillMissingGenres({ db, apiKey: YOUTUBE_API_KEY });
     return true;
   }
 
