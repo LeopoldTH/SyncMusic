@@ -331,6 +331,23 @@ export function openDatabase(path: string) {
       WHERE user_id = ? AND (played_at < ? OR (played_at = ? AND id < ?))
       ORDER BY played_at DESC, id DESC LIMIT ?
     `),
+    /*
+     * Videos dont les genres n ont jamais ete demandes (U6, KTD12). Groupees par
+     * identifiant de video, pas listees par ligne: le genre est une propriete de la
+     * video, donc deux ecoutes du meme morceau se remplissent d un seul appel, et un
+     * appel couvre cinquante videos distinctes plutot que cinquante ecoutes.
+     *
+     * Les plus recemment jouees d abord: le remplissage est borne par passage, et une
+     * soiree d hier merite ses genres avant les archives.
+     */
+    videoIdsWithoutGenres: db.prepare(`
+      SELECT video_id FROM history_entries
+      WHERE genres IS NULL
+      GROUP BY video_id
+      ORDER BY MAX(played_at) DESC
+      LIMIT ?
+    `),
+    setVideoGenres: db.prepare("UPDATE history_entries SET genres = ? WHERE video_id = ?"),
     countPlaylists: db.prepare("SELECT COUNT(*) AS n FROM playlists WHERE user_id = ?"),
     createPlaylist: db.prepare(
       "INSERT INTO playlists (user_id, name, created_at) VALUES (?, ?, ?) RETURNING id",
@@ -504,6 +521,32 @@ export function openDatabase(path: string) {
         ? statements.historyPageAfter.all(userId, after.playedAt, after.playedAt, after.id, limit)
         : statements.historyPage.all(userId, limit);
       return rows.map(toHistoryEntry);
+    },
+
+    /*
+     * Les videos a interroger, les plus recemment jouees d abord (U6). Aucun compte en
+     * entree: le genre ne depend pas de qui a ecoute, et un seul appel remplit la
+     * ligne des deux participants.
+     */
+    listVideoIdsWithoutGenres(limit: number): string[] {
+      return statements.videoIdsWithoutGenres
+        .all(Math.max(0, Math.trunc(limit)))
+        .map((row) => String(row["video_id"]));
+    },
+
+    /*
+     * Ecrit les genres sur toutes les lignes de cette video (U6, R11), toutes seances
+     * et tous comptes confondus. Rend le nombre de lignes touchees.
+     *
+     * Un tableau vide est une valeur pleine, « interrogee, aucun genre » (KTD12): sans
+     * lui, une video sans genre serait redemandee a chaque ouverture de l ecran. C est
+     * aussi pourquoi l ecriture n est pas conditionnee a `genres IS NULL`: elle est le
+     * seul chemin qui ecrit cette colonne, et rejouer un lot doit rester sans effet
+     * de bord.
+     */
+    setVideoGenres(videoId: string, genres: readonly string[]): number {
+      const result = statements.setVideoGenres.run(JSON.stringify(genres), videoId);
+      return Number(result.changes);
     },
 
     createPlaylist(userId: number, name: string, nowMs: number): { ok: true; id: number } | Failure {
