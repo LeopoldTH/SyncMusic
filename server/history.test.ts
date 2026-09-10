@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openDatabase, type Db, type User } from "./db";
 import { recordCommonStart, recordPlayedSegment } from "./history";
 import { createRoom, type RoomSnapshot } from "./room";
+import { createRegistry } from "./roomRegistry";
 import { fetchEachVideoInfo } from "./videoInfo";
 
 const T0 = 1_700_000_000_000;
@@ -472,5 +473,190 @@ describe("duree jouee, de la room a la ligne (U4)", () => {
     expect(db.listHistory(leo.id, 10)[0]).toMatchObject({
       title: "Despacito", listenedMs: 5_000,
     });
+  });
+});
+
+/*
+ * Une soiree abandonnee en pleine lecture (U5, R5, AE5). Le morceau reste courant, plus
+ * personne n est la, et la room finit balayee: sa duree se rattrape a ce moment-la.
+ */
+describe("duree du dernier morceau a la destruction de la room (U5, R5)", () => {
+  /** Le balayage des rooms vides tourne toutes les dix secondes (server/index.ts:36). */
+  const BALAYAGE_MS = 10_000;
+
+  let db: Db;
+  let leo: User;
+
+  beforeEach(() => {
+    db = openDatabase(":memory:");
+    leo = db.upsertUser({ googleSub: "sub-leo", name: "Leo", email: null }, T0);
+  });
+
+  afterEach(() => db.close());
+
+  /*
+   * Le raccordement du balayage (server/index.ts, intervalle SWEEP_MS): la room sortie
+   * du registre rend son dernier segment, l appelant l ecrit. Aucune session, aucun
+   * compte ne passe par la — a cet instant il n en existe plus aucun pour cette room.
+   */
+  function balayer(reg: ReturnType<typeof createRegistry>, nowMs: number): void {
+    for (const destroyed of reg.sweep(nowMs)) {
+      const played = destroyed.room.finalSegment();
+      if (played) recordPlayedSegment({ db, instanceId: destroyed.instanceId, played });
+    }
+  }
+
+  /** Deux participants, deux morceaux, depart commun a la position zero emis a T0. */
+  function enLecture(reg: ReturnType<typeof createRegistry>, users: Array<User | null>) {
+    const { code, room } = reg.create(T0);
+    const instanceId = reg.instanceOf(code) ?? "";
+    room.join("leo", T0);
+    room.join("pote", T0);
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    room.queueAdd("leo", "dQw4w9WgXcQ", T0);
+    room.control("play", T0);
+    const attente = room.resumeAt(0, T0);
+    room.ready("leo", attente.barrierId, T0);
+    room.ready("pote", attente.barrierId, T0);
+    recordCommonStart({ db, instanceId, snapshot: room.state(), users, nowMs: T0 });
+    return { code, room, instanceId };
+  }
+
+  const ligneDe = (videoId: string) =>
+    db.listHistory(leo.id, 10).find((e) => e.videoId === videoId);
+
+  /*
+   * Le coeur de l unite (AE5, KTD2). L ecart est mesure: les deux se deconnectent quand
+   * la position vaut 20 000 ms, et le balayage ne passe que 40 000 ms plus tard, delai
+   * de grace puis balayage suivant. Lire la position a cet instant enregistrerait
+   * 60 000 ms, dont 40 000 de silence.
+   */
+  it("ecrit la position au depart des deux participants, pas celle du balayage (AE5, R5)", () => {
+    const reg = createRegistry(CFG);
+    const { room } = enLecture(reg, [leo]);
+    const depart = T0 + CFG.leadMs + 20_000;
+    room.disconnect("leo", depart);
+    room.disconnect("pote", depart);
+    const balayage = depart + CFG.graceMs + BALAYAGE_MS;
+    // La contre-mesure: c est bien 60 000 ms que rendrait l implementation naive.
+    expect(room.positionNow(balayage)).toBe(60_000);
+
+    balayer(reg, balayage);
+
+    expect(ligneDe("kJQP7kiw5Fk")?.listenedMs).toBe(20_000);
+  });
+
+  /*
+   * Le depart volontaire libere la place tout de suite, sans delai de grace: la room
+   * est balayable des le balayage suivant, et ne laisse aucune marque de presence a
+   * relire (KTD2).
+   */
+  it("ecrit aussi la duree quand les deux sont partis volontairement", () => {
+    const reg = createRegistry(CFG);
+    const { room } = enLecture(reg, [leo]);
+    const depart = T0 + CFG.leadMs + 20_000;
+    room.leave("leo", depart);
+    room.leave("pote", depart);
+
+    balayer(reg, depart + BALAYAGE_MS);
+
+    expect(ligneDe("kJQP7kiw5Fk")?.listenedMs).toBe(20_000);
+  });
+
+  /*
+   * Cas mixte. Une ancre derivee des marques de presence prendrait celle de « leo »,
+   * seule survivante, et enregistrerait 20 000 ms au lieu de 70 000.
+   */
+  it("mesure au second depart quand l un perd sa socket et l autre part ensuite", () => {
+    const reg = createRegistry(CFG);
+    const { room } = enLecture(reg, [leo]);
+    room.disconnect("leo", T0 + CFG.leadMs + 20_000);
+    const second = T0 + CFG.leadMs + 70_000;
+    room.leave("pote", second);
+
+    balayer(reg, second + BALAYAGE_MS);
+
+    expect(ligneDe("kJQP7kiw5Fk")?.listenedMs).toBe(70_000);
+  });
+
+  it("n ecrit rien quand aucun morceau n etait courant", () => {
+    const reg = createRegistry(CFG);
+    const { code, room } = reg.create(T0);
+    room.join("leo", T0);
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0); // ajoute, jamais lance
+    const depart = T0 + 20_000;
+    room.leave("leo", depart);
+
+    balayer(reg, depart + BALAYAGE_MS);
+
+    expect(db.listHistory(leo.id, 10)).toHaveLength(0);
+    expect(reg.get(code)).toBeUndefined();
+  });
+
+  /*
+   * La duree s ajoute, elle ne remplace pas (KTD3): le morceau avait deja ete ecoute
+   * une premiere fois dans la meme seance, avant d etre rappele par « precedent ».
+   */
+  it("ajoute le dernier segment a la duree deja accumulee, sans la remplacer (KTD3)", () => {
+    const reg = createRegistry(CFG);
+    const { room, instanceId } = enLecture(reg, [leo]);
+    const zap = T0 + CFG.leadMs + 30_000;
+    const premier = room.control("next", zap);
+    if (premier) recordPlayedSegment({ db, instanceId, played: premier });
+    const suite = room.resumeAt(0, zap);
+    room.ready("leo", suite.barrierId, zap);
+    room.ready("pote", suite.barrierId, zap);
+    recordCommonStart({ db, instanceId, snapshot: room.state(), users: [leo], nowMs: zap });
+    const retour = zap + CFG.leadMs + 5_000;
+    const second = room.control("previous", retour);
+    if (second) recordPlayedSegment({ db, instanceId, played: second });
+    const reprise = room.resumeAt(0, retour);
+    room.ready("leo", reprise.barrierId, retour);
+    room.ready("pote", reprise.barrierId, retour);
+    const depart = retour + CFG.leadMs + 20_000;
+    room.leave("leo", depart);
+    room.leave("pote", depart);
+
+    balayer(reg, depart + BALAYAGE_MS);
+
+    expect(ligneDe("kJQP7kiw5Fk")?.listenedMs).toBe(50_000);
+    expect(ligneDe("dQw4w9WgXcQ")?.listenedMs).toBe(5_000);
+  });
+
+  /*
+   * Le point d accroche rend l instance parce que le registre ne la rend plus apres
+   * coup: la duree doit viser la seance detruite, pas celle qui joue encore le meme
+   * morceau a cote (KTD6).
+   */
+  it("vise la seance detruite, pas la room voisine qui joue le meme morceau", () => {
+    const reg = createRegistry(CFG);
+    const abandonnee = enLecture(reg, [leo]);
+    const encoreLa = enLecture(reg, [leo]);
+    const depart = T0 + CFG.leadMs + 20_000;
+    abandonnee.room.leave("leo", depart);
+    abandonnee.room.leave("pote", depart);
+
+    balayer(reg, depart + BALAYAGE_MS);
+
+    const lignes = db.listHistory(leo.id, 10).filter((e) => e.videoId === "kJQP7kiw5Fk");
+    expect(lignes.find((e) => e.roomInstanceId === abandonnee.instanceId)?.listenedMs).toBe(20_000);
+    expect(lignes.find((e) => e.roomInstanceId === encoreLa.instanceId)?.listenedMs).toBeNull();
+    expect(reg.get(encoreLa.code)).toBeDefined();
+  });
+
+  /*
+   * R10. La garde du compte est appliquee une fois pour toutes au depart commun: sans
+   * ligne, l accumulation ne touche rien et n en fabrique aucune.
+   */
+  it("ne fabrique aucune ligne pour une soiree jouee entre invites", () => {
+    const reg = createRegistry(CFG);
+    const { room } = enLecture(reg, [null, null]);
+    const depart = T0 + CFG.leadMs + 20_000;
+    room.leave("leo", depart);
+    room.leave("pote", depart);
+
+    balayer(reg, depart + BALAYAGE_MS);
+
+    expect(db.listHistory(leo.id, 10)).toHaveLength(0);
   });
 });

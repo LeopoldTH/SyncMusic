@@ -43,7 +43,8 @@ describe("recherche et destruction", () => {
     occupee.room.join("leo", T0);
 
     const destroyed = reg.sweep(T0 + CFG.graceMs + 1);
-    expect(destroyed).toContain(vide.code);
+    expect(destroyed.map((d) => d.code)).toContain(vide.code);
+    expect(destroyed.map((d) => d.code)).not.toContain(occupee.code);
     expect(reg.get(vide.code)).toBeUndefined();
     expect(reg.get(occupee.code)).toBeDefined();
   });
@@ -53,8 +54,49 @@ describe("recherche et destruction", () => {
     const { code, room } = reg.create(T0);
     room.join("leo", T0);
     room.disconnect("leo", T0);
-    expect(reg.sweep(T0 + CFG.graceMs - 1)).not.toContain(code);
-    expect(reg.sweep(T0 + CFG.graceMs + 1)).toContain(code);
+    expect(reg.sweep(T0 + CFG.graceMs - 1).map((d) => d.code)).not.toContain(code);
+    expect(reg.sweep(T0 + CFG.graceMs + 1).map((d) => d.code)).toContain(code);
+  });
+});
+
+/*
+ * Le point d accroche de U5. Le balayage rendait les codes seuls, et l appelant les
+ * jetait; il doit maintenant rendre de quoi ecrire la duree du dernier morceau (R5).
+ */
+describe("point d accroche a la destruction (U5)", () => {
+  it("rend la room detruite et son instance, le temps d une derniere lecture", () => {
+    const reg = createRegistry(CFG);
+    const { code, room } = reg.create(T0);
+    const instanceId = reg.instanceOf(code);
+
+    const [destroyed] = reg.sweep(T0 + CFG.graceMs + 1);
+
+    expect(destroyed?.code).toBe(code);
+    expect(destroyed?.room).toBe(room);
+    expect(destroyed?.instanceId).toBe(instanceId);
+  });
+
+  /*
+   * La raison d etre du point d accroche: apres le balayage l entree du registre
+   * n existe plus, donc l instance ne se retrouve plus par le code. Sans elle, la
+   * duree n aurait aucune cle ou aller (KTD6).
+   */
+  it("est le seul moyen d avoir l instance: le registre ne la rend plus apres coup", () => {
+    const reg = createRegistry(CFG);
+    const { code } = reg.create(T0);
+
+    reg.sweep(T0 + CFG.graceMs + 1);
+
+    expect(reg.instanceOf(code)).toBeUndefined();
+  });
+
+  it("ne rend rien pour une room encore occupee", () => {
+    const reg = createRegistry(CFG);
+    const { code, room } = reg.create(T0);
+    room.join("leo", T0);
+
+    expect(reg.sweep(T0 + CFG.graceMs + 1)).toEqual([]);
+    expect(reg.get(code)).toBeDefined();
   });
 });
 

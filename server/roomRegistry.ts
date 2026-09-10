@@ -55,13 +55,18 @@ export function createRegistry(config: RoomConfig, generate: () => string = rand
       return rooms.get(code)?.instanceId;
     },
 
-    /** Detruit les rooms que plus personne ne peut rejoindre. Rend les codes liberes. */
-    sweep(nowMs: number): string[] {
-      const destroyed: string[] = [];
+    /*
+     * Detruit les rooms que plus personne ne peut rejoindre. Rend le code libere, mais
+     * aussi la room et son instance (U5, R5): c est la derniere occasion de lire la
+     * duree du morceau reste courant, l entree venant d etre supprimee ici meme et ni
+     * `get` ni `instanceOf` ne la retrouvant apres coup.
+     */
+    sweep(nowMs: number): Array<{ code: string; room: Room; instanceId: string }> {
+      const destroyed: Array<{ code: string; room: Room; instanceId: string }> = [];
       for (const [code, entry] of rooms) {
         if (entry.room.isEmpty(nowMs)) {
           rooms.delete(code);
-          destroyed.push(code);
+          destroyed.push({ code, room: entry.room, instanceId: entry.instanceId });
         }
       }
       return destroyed;

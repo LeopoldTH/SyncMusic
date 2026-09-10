@@ -902,3 +902,136 @@ describe("duree jouee rendue par le transport (U4)", () => {
     expect(source).not.toMatch(/from\s+"\.\/(db|history)"/);
   });
 });
+
+/*
+ * Le dernier morceau d une soiree abandonnee (U5, R5, KTD2). L ancre est un instant
+ * de dernier depart que la room tient elle-meme: la deconnexion la pose, le depart
+ * volontaire aussi, et c est la seule facon d y arriver puisque `leave` supprime
+ * l entree de presence sans laisser de marque a relire.
+ */
+describe("segment final au dernier depart (U5, KTD2)", () => {
+  /** Le balayage des rooms vides tourne toutes les dix secondes (server/index.ts:36). */
+  const BALAYAGE_MS = 10_000;
+
+  /** Un morceau courant, depart commun a la position zero emis a T0. */
+  function enLecture() {
+    const room = createRoom("ABCD", CFG);
+    room.join("leo", T0);
+    room.join("pote", T0);
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    room.control("play", T0);
+    const depart = room.resumeAt(0, T0);
+    room.ready("leo", depart.barrierId, T0);
+    room.ready("pote", depart.barrierId, T0);
+    return room;
+  }
+
+  /*
+   * Le coeur de l unite. L ecart est mesure: les deux partent quand la position vaut
+   * 20 000 ms, et la room n est balayee que 40 000 ms plus tard (delai de grace puis
+   * balayage suivant), la timeline ayant couru pendant tout ce silence. Lire
+   * `positionNow` a cet instant enregistrerait 60 000 ms d ecoute imaginaire.
+   */
+  it("mesure au depart des deux participants, pas au balayage quarante secondes plus tard (AE5)", () => {
+    const room = enLecture();
+    const depart = T0 + CFG.leadMs + 20_000;
+    room.disconnect("leo", depart);
+    room.disconnect("pote", depart);
+    const balayage = depart + CFG.graceMs + BALAYAGE_MS;
+
+    // La contre-mesure: c est bien 60 000 ms que rendrait l implementation naive.
+    expect(room.isEmpty(balayage)).toBe(true);
+    expect(room.positionNow(balayage)).toBe(60_000);
+    expect(room.finalSegment()?.item.itemId).toBe("q1");
+    expect(room.finalSegment()?.listenedMs).toBe(20_000);
+  });
+
+  it("prend le plus recent des deux departs quand ils ne sont pas simultanes", () => {
+    const room = enLecture();
+    room.disconnect("leo", T0 + CFG.leadMs + 20_000);
+    room.disconnect("pote", T0 + CFG.leadMs + 35_000);
+
+    expect(room.finalSegment()?.listenedMs).toBe(35_000);
+  });
+
+  /*
+   * Le piege central: `leave` supprime l entree de presence et ne laisse aucune marque
+   * de deconnexion. Une ancre derivee des marques de presence ne verrait rien ici.
+   */
+  it("pose l ancre sur un depart volontaire, qui ne laisse aucune marque de presence", () => {
+    const room = enLecture();
+    const depart = T0 + CFG.leadMs + 20_000;
+    room.leave("leo", depart);
+    room.leave("pote", depart);
+
+    expect(room.state().participants).toHaveLength(0);
+    expect(room.finalSegment()?.listenedMs).toBe(20_000);
+  });
+
+  /*
+   * Cas mixte. Une ancre derivee de la marque la plus recente rendrait celle de « leo »,
+   * seule marque restante, et mesurerait au premier depart au lieu du second.
+   */
+  it("mesure au second depart quand l un perd sa socket et l autre part volontairement apres", () => {
+    const room = enLecture();
+    room.disconnect("leo", T0 + CFG.leadMs + 20_000);
+    room.leave("pote", T0 + CFG.leadMs + 70_000);
+
+    expect(room.finalSegment()?.listenedMs).toBe(70_000);
+  });
+
+  it("ne rend rien quand aucun morceau n etait courant au dernier depart", () => {
+    const room = createRoom("ABCD", CFG);
+    room.join("leo", T0);
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    room.leave("leo", T0 + 20_000);
+
+    expect(room.finalSegment()).toBe(null);
+  });
+
+  it("ne rend rien pour une room que personne n a jamais rejointe", () => {
+    const room = createRoom("ABCD", CFG);
+
+    expect(room.isEmpty(T0)).toBe(true);
+    expect(room.finalSegment()).toBe(null);
+  });
+
+  it("compte la lecture reelle, pause deduite, jusqu au depart (R1)", () => {
+    const room = enLecture();
+    const pause = T0 + CFG.leadMs + 10_000;
+    room.control("pause", pause);
+    const reprise = pause + 600_000; // dix minutes d arret
+    room.control("play", reprise);
+    const attente = room.resumeAt(10_000, reprise);
+    room.ready("leo", attente.barrierId, reprise);
+    room.ready("pote", attente.barrierId, reprise);
+
+    room.leave("leo", reprise + CFG.leadMs + 20_000);
+
+    expect(room.finalSegment()?.listenedMs).toBe(30_000);
+  });
+
+  /*
+   * Lecture seule: le balayage appelle cet accesseur sur une room qu il vient de sortir
+   * du registre, mais rien ne garantit qu il soit le seul a la lire. Muter la timeline
+   * ici ferait dependre la duree ecrite de l ordre des appels.
+   */
+  it("ne mute rien: deux lectures rendent la meme duree", () => {
+    const room = enLecture();
+    room.leave("leo", T0 + CFG.leadMs + 20_000);
+    room.leave("pote", T0 + CFG.leadMs + 20_000);
+
+    expect(room.finalSegment()?.listenedMs).toBe(20_000);
+    expect(room.finalSegment()?.listenedMs).toBe(20_000);
+    expect(room.positionNow(T0 + CFG.leadMs + 20_000)).toBe(20_000);
+  });
+
+  it("ignore un depart de quelqu un qui n est pas la", () => {
+    const room = enLecture();
+    room.leave("inconnu", T0 + CFG.leadMs + 50_000);
+    room.leave("leo", T0 + CFG.leadMs + 20_000);
+    room.leave("pote", T0 + CFG.leadMs + 20_000);
+
+    expect(room.finalSegment()?.listenedMs).toBe(20_000);
+  });
+});
