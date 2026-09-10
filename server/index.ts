@@ -12,7 +12,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { z } from "zod";
 import { parseClientMessage, PSEUDO_MAX_CHARS, VideoId, type ServerMessage } from "../shared/protocol";
 import { createRegistry, type Room } from "./roomRegistry";
-import { fetchVideoTitle } from "./videoTitle";
+import { fetchEachVideoInfo } from "./videoInfo";
 import { createStaticHandler } from "./static";
 import { searchVideos } from "./youtubeSearch";
 import { createSearchBudget } from "./searchBudget";
@@ -397,6 +397,29 @@ async function handleApi(request: IncomingMessage, response: ServerResponse): Pr
 }
 
 /*
+ * Titre, artiste et miniature arrivent apres l ajout, par oEmbed (U3). Un seul chemin
+ * pour l ajout un par un et pour l envoi d une playlist: sans cela l artiste serait
+ * vide exactement sur la facon de remplir une soiree (R2, KTD6).
+ *
+ * Fire-and-forget: le morceau est ajoute et jouable immediatement, attendre YouTube
+ * pour afficher une ligne de file serait une regression. La room est relue a chaque
+ * reponse, elle peut avoir disparu pendant l attente.
+ */
+function fillQueueInfo(code: string, entries: Array<{ itemId: string; videoId: string }>): void {
+  void fetchEachVideoInfo(entries.map((e) => e.videoId), (index, outcome) => {
+    const entry = entries[index];
+    const room = registry.get(code);
+    if (entry === undefined || room === undefined) return;
+    const changed = outcome.ok
+      ? room.setInfo(entry.itemId, outcome)
+      // Une panne ne marque rien: le morceau s enregistrera sans artiste (R4). Seul
+      // un refus de YouTube le tient hors de l historique (R14).
+      : outcome.reason === "refused" && room.markRefused(entry.itemId);
+    if (changed) broadcastState(code, room);
+  });
+}
+
+/*
  * Un depart commun se diffuse et s inscrit a l historique au meme endroit (U5, KTD6):
  * c est le seul instant ou le serveur sait a la fois quel morceau part et qui est la
  * pour l entendre. Le handler `ready` et la boucle de tick passent tous deux par ici.
@@ -537,16 +560,7 @@ function attachSocket(socket: WebSocket, user: User | null): void {
         const added = room.queueAdd(session.participantId, message.videoId, now);
         if (!added.ok) return fail(socket, added.code, added.message);
         broadcastState(code, room);
-        /*
-         * Le titre arrive apres coup. Le morceau est ajoute et jouable immediatement:
-         * attendre YouTube pour afficher une ligne de file serait une regression.
-         */
-        const itemId = added.itemId;
-        void fetchVideoTitle(message.videoId).then((title: string | null) => {
-          if (title === null) return;
-          const still = registry.get(code);
-          if (still && still.setTitle(itemId, title)) broadcastState(code, still);
-        });
+        fillQueueInfo(code, [{ itemId: added.itemId, videoId: message.videoId }]);
         return;
       }
       case "track_ended": {
@@ -585,7 +599,14 @@ function attachSocket(socket: WebSocket, user: User | null): void {
         );
         if (!sent.ok) return fail(socket, sent.code, sent.message);
         // Comportement d ajouts ordinaires (R9): la file grandit, rien ne demarre.
-        return broadcastState(code, room);
+        broadcastState(code, room);
+        /*
+         * Meme chemin qu un ajout un par un (U3): la playlist connait les titres, mais
+         * l artiste vient toujours d oEmbed (KTD6). Les requetes sont bornees en
+         * simultane, une playlist pouvant porter cent morceaux.
+         */
+        fillQueueInfo(code, sent.added);
+        return;
       }
       case "control_transport": {
         room.control(message.action, now);

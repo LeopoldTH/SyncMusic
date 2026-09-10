@@ -3,9 +3,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { Queue } from "./Queue";
 import type { QueueItem } from "../../shared/protocol";
 
+/** Ce que la file n affiche pas encore: artiste, miniature et refus (U3). */
+const sansInfos = { channelTitle: null, thumbnailUrl: null, refused: false };
+
 const items: QueueItem[] = [
-  { itemId: "q1", videoId: "kJQP7kiw5Fk", addedBy: "leo", title: "Luis Fonsi - Despacito ft. Daddy Yankee" },
-  { itemId: "q2", videoId: "dQw4w9WgXcQ", addedBy: "pote", title: null },
+  { itemId: "q1", videoId: "kJQP7kiw5Fk", addedBy: "leo", title: "Luis Fonsi - Despacito ft. Daddy Yankee", ...sansInfos },
+  { itemId: "q2", videoId: "dQw4w9WgXcQ", addedBy: "pote", title: null, ...sansInfos },
 ];
 
 const noop = () => {};

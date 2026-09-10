@@ -295,7 +295,10 @@ describe("sessions", () => {
 });
 
 describe("historique", () => {
-  const ECOUTE = { videoId: "dQw4w9WgXcQ", title: "Get Lucky", roomItemKey: "inst-1#i1" };
+  const ECOUTE = {
+    videoId: "dQw4w9WgXcQ", title: "Get Lucky",
+    roomItemKey: "inst-1#i1", roomInstanceId: "inst-1",
+  };
 
   it("ne cree qu une entree pour un meme morceau, sans erreur au second passage", () => {
     const db = fresh();
@@ -319,7 +322,9 @@ describe("historique", () => {
     const db = fresh();
     const user = withUser(db);
     db.recordListen({ userId: user, ...ECOUTE }, T0);
-    db.recordListen({ userId: user, ...ECOUTE, roomItemKey: "inst-2#i1" }, T0 + JOUR);
+    db.recordListen({
+      userId: user, ...ECOUTE, roomItemKey: "inst-2#i1", roomInstanceId: "inst-2",
+    }, T0 + JOUR);
     expect(db.listHistory(user, 10)).toHaveLength(2);
   });
 
@@ -354,12 +359,20 @@ describe("historique", () => {
     expect(long?.title).toHaveLength(LIMITS.titleChars);
   });
 
-  it("inscrit l instance de room de la nouvelle ecoute (KTD4)", () => {
+  /*
+   * L instance vient de l appelant, qui construit la cle: la base ne redecoupe plus
+   * `<instance>#<item>` (KTD4). Une instance qui ne ressemble pas au prefixe de la cle
+   * est la preuve que rien n est rededuit ici; le decoupage ne vit plus que dans la
+   * migration 2, pour les lignes anciennes.
+   */
+  it("inscrit l instance de room que l appelant fournit (KTD4)", () => {
     const db = fresh();
     const user = withUser(db);
     db.recordListen({ userId: user, ...ECOUTE }, T0);
-    db.recordListen({ userId: user, ...ECOUTE, roomItemKey: "sans-separateur" }, T0 + 1);
-    expect(db.listHistory(user, 10).map((e) => e.roomInstanceId)).toEqual([null, "inst-1"]);
+    db.recordListen({
+      userId: user, ...ECOUTE, roomItemKey: "sans-separateur", roomInstanceId: "inst-9",
+    }, T0 + 1);
+    expect(db.listHistory(user, 10).map((e) => e.roomInstanceId)).toEqual(["inst-9", "inst-1"]);
   });
 
   it("garde le nom de chaine et la miniature quand oEmbed les a fournis (R2, R3)", () => {
@@ -504,7 +517,9 @@ describe("suppression d un compte", () => {
     const db = openDatabase(path);
     const user = withUser(db);
     db.createSession("secret", user, T0);
-    db.recordListen({ userId: user, videoId: "abc", title: null, roomItemKey: "inst-1#i1" }, T0);
+    db.recordListen({
+      userId: user, videoId: "abc", title: null, roomItemKey: "inst-1#i1", roomInstanceId: "inst-1",
+    }, T0);
     const created = db.createPlaylist(user, "Trajet", T0);
     if (!created.ok) throw new Error("playlist non creee");
     db.addPlaylistItem(created.id, user, { videoId: "abc", title: null }, T0);

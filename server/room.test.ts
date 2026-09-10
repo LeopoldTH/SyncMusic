@@ -208,6 +208,14 @@ describe("file de lecture", () => {
     expect(room.state().currentItemId).toBe(null);
   });
 
+  it("ajoute un morceau sans artiste, sans miniature et non refuse (U3)", () => {
+    const room = roomWithTwo();
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    expect(room.state().queue[0]).toMatchObject({
+      title: null, channelTitle: null, thumbnailUrl: null, refused: false,
+    });
+  });
+
   it("refuse un ajout quand la file est pleine (KTD9)", () => {
     const room = createRoom("ABCD", { ...CFG, maxQueue: 2 });
     room.join("leo", T0);
@@ -263,6 +271,76 @@ describe("envoi de playlist (U6)", () => {
     const sent = room.queueAddAll("intrus", items(1), T0);
     expect(sent.ok).toBe(false);
     if (!sent.ok) expect(sent.code).toBe("not_in_room");
+  });
+
+  /* Sans ces identifiants, l appelant ne peut poser sur aucun element ce qu oEmbed
+     rendra pour lui: R2 resterait vide sur ce chemin (U3). */
+  it("rend un element par morceau envoye, dans l ordre de la file", () => {
+    const room = roomWithTwo();
+    const sent = room.queueAddAll("leo", items(3), T0);
+    if (!sent.ok) return expect.unreachable("l envoi aurait du reussir");
+    expect(sent.added.map((a) => a.videoId)).toEqual(items(3).map((i) => i.videoId));
+    expect(room.state().queue.map((i) => i.itemId)).toEqual(sent.added.map((a) => a.itemId));
+  });
+});
+
+describe("informations de video posees sur la file (U3)", () => {
+  function roomWithItem() {
+    const room = roomWithTwo();
+    const added = room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    if (!added.ok) throw new Error("l ajout aurait du reussir");
+    return { room, itemId: added.itemId };
+  }
+
+  it("pose le titre, le nom de chaine et la miniature (R2, R3)", () => {
+    const { room, itemId } = roomWithItem();
+    expect(room.setInfo(itemId, {
+      title: "Despacito",
+      channelTitle: "LuisFonsiVEVO",
+      thumbnailUrl: "https://i.ytimg.com/vi/kJQP7kiw5Fk/hqdefault.jpg",
+    })).toBe(true);
+    expect(room.state().queue[0]).toMatchObject({
+      title: "Despacito",
+      channelTitle: "LuisFonsiVEVO",
+      thumbnailUrl: "https://i.ytimg.com/vi/kJQP7kiw5Fk/hqdefault.jpg",
+    });
+  });
+
+  it("n efface pas un titre deja connu quand oEmbed n en rend pas", () => {
+    // Cas de l envoi de playlist: le titre arrive avec le morceau, et oEmbed n est
+    // la que pour l artiste (KTD6).
+    const room = roomWithTwo();
+    const sent = room.queueAddAll("leo", [{ videoId: "kJQP7kiw5Fk", title: "Titre de la playlist" }], T0);
+    if (!sent.ok) return expect.unreachable("l envoi aurait du reussir");
+    const first = sent.added[0];
+    if (first === undefined) return expect.unreachable("la playlist portait un morceau");
+
+    room.setInfo(first.itemId, { title: null, channelTitle: "LuisFonsiVEVO", thumbnailUrl: null });
+    expect(room.state().queue[0]).toMatchObject({
+      title: "Titre de la playlist", channelTitle: "LuisFonsiVEVO",
+    });
+  });
+
+  it("ne fait rien pour un morceau retire entre-temps", () => {
+    const { room, itemId } = roomWithItem();
+    room.queueRemove("leo", itemId, T0 + 10);
+    expect(room.setInfo(itemId, { title: "Despacito", channelTitle: null, thumbnailUrl: null }))
+      .toBe(false);
+    expect(room.markRefused(itemId)).toBe(false);
+  });
+
+  it("marque le morceau que YouTube refuse de decrire (R14)", () => {
+    const { room, itemId } = roomWithItem();
+    expect(room.markRefused(itemId)).toBe(true);
+    expect(room.state().queue[0]?.refused).toBe(true);
+    // Le morceau reste dans la file: il est jouable, il ne s enregistrera pas.
+    expect(room.state().queue).toHaveLength(1);
+  });
+
+  it("ne signale pas deux fois le meme refus", () => {
+    const { room, itemId } = roomWithItem();
+    room.markRefused(itemId);
+    expect(room.markRefused(itemId)).toBe(false);
   });
 });
 

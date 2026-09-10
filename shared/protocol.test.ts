@@ -52,6 +52,39 @@ describe("messages invalides", () => {
     if (!result.ok) expect(result.error).toContain("positionSeconds");
   });
 
+  /*
+   * L element de file a gagne l artiste, la miniature et le refus de YouTube (U3):
+   * le schema doit rester strict jusque dans les elements du tableau, sinon un champ
+   * ajoute cote serveur passerait sans que le client le connaisse.
+   */
+  it("accepte un element de file portant artiste, miniature et refus", () => {
+    const result = parseServerMessage({
+      type: "room_state", code: "ABCD", youAre: "leo", participants: [],
+      queue: [{
+        itemId: "q1", videoId: "kJQP7kiw5Fk", addedBy: "leo", title: "Despacito",
+        channelTitle: "LuisFonsiVEVO",
+        thumbnailUrl: "https://i.ytimg.com/vi/kJQP7kiw5Fk/hqdefault.jpg",
+        refused: false,
+      }],
+      currentItemId: "q1", playing: false,
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejette un element de file portant un champ non declare", () => {
+    const result = parseServerMessage({
+      type: "room_state", code: "ABCD", youAre: "leo", participants: [],
+      queue: [{
+        itemId: "q1", videoId: "kJQP7kiw5Fk", addedBy: "leo", title: null,
+        channelTitle: null, thumbnailUrl: null, refused: false,
+        genres: ["Pop music"],
+      }],
+      currentItemId: null, playing: false,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("genres");
+  });
+
   it("rejette un type de message inconnu", () => {
     const result = parseClientMessage({ type: "teleporte_moi" });
     expect(result.ok).toBe(false);

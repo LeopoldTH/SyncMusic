@@ -27,6 +27,13 @@ export function recordCommonStart(args: {
   if (snapshot.currentItemId === null) return;
   const item = snapshot.queue.find((i) => i.itemId === snapshot.currentItemId);
   if (item === undefined) return;
+  /*
+   * YouTube refuse de decrire cette video: privee, supprimee, inexistante (R14). Elle
+   * n entre pas dans l historique, sinon la memoire des ecoutes se remplirait de
+   * lignes qu on ne saura jamais nommer. Une panne reseau, elle, ne pose pas ce
+   * drapeau: le morceau s enregistre alors sans artiste (R4).
+   */
+  if (item.refused) return;
 
   for (const user of args.users) {
     if (user === null) continue; // un invite ne laisse aucune trace (R10)
@@ -34,10 +41,15 @@ export function recordCommonStart(args: {
       {
         userId: user.id,
         videoId: item.videoId,
-        // Copie du titre si la queue le connait deja, sinon null: pas de second fetch,
-        // et pas de rattrapage quand le titre arrive apres coup (choix de U5).
+        // Copie de ce que la queue connait deja, sinon null: pas de second fetch, et
+        // pas de rattrapage quand la reponse oEmbed arrive apres coup (choix de U5).
         title: item.title,
+        channelTitle: item.channelTitle,
+        thumbnailUrl: item.thumbnailUrl,
         roomItemKey: `${args.instanceId}#${item.itemId}`,
+        // L instance passe explicitement: c est ici qu on construit la cle, donc le
+        // seul endroit qui doive connaitre son format (KTD4).
+        roomInstanceId: args.instanceId,
       },
       args.nowMs,
     );

@@ -147,6 +147,20 @@ export const QueueItem = z.object({
    * pouvoir etre ajoute et joue meme si YouTube ne repond pas.
    */
   title: z.string().nullable(),
+  /*
+   * Nom de la chaine qui a publie la video, tenu pour l artiste (R2), et adresse de
+   * sa miniature (R3). Meme regime que le titre: ils arrivent apres l ajout, par
+   * oEmbed, et restent nuls quand la reponse ne les porte pas (R4).
+   */
+  channelTitle: z.string().nullable(),
+  thumbnailUrl: z.string().nullable(),
+  /*
+   * YouTube refuse de decrire cette video: privee, supprimee, ou inexistante (R14).
+   * Etat de file et non de persistance: la room ignore que l historique existe
+   * (KTD9), c est l ecriture de l historique qui lit ce drapeau et n inscrit rien.
+   * Une panne reseau ne le pose pas: le morceau reste jouable et enregistrable.
+   */
+  refused: z.boolean(),
 }).strict();
 export type QueueItem = z.infer<typeof QueueItem>;
 
