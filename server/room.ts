@@ -186,7 +186,12 @@ export function createRoom(code: string, config: RoomConfig) {
         return fail("queue_full", `la file est pleine (${config.maxQueue} morceaux)`);
       }
       const itemId = `q${nextItemId++}`;
-      queue.push({ itemId, videoId, addedBy: participantId, title: null });
+      queue.push({
+        itemId, videoId, addedBy: participantId,
+        // Titre, artiste et miniature arrivent apres, par oEmbed (U3): le morceau
+        // est ajoute et jouable sans attendre YouTube.
+        title: null, channelTitle: null, thumbnailUrl: null, refused: false,
+      });
       void nowMs;
       return { ok: true, itemId };
     },
@@ -195,22 +200,32 @@ export function createRoom(code: string, config: RoomConfig) {
      * Ajout d une playlist entiere (U6, R9). Tout ou rien: refuser au milieu laisserait
      * une demi-playlist dans la file, pire que refuser franchement. Les titres deja
      * connus arrivent avec les morceaux, il n y a rien a aller rechercher.
+     *
+     * Rend les elements poses, dans l ordre de la file: l artiste, lui, vient toujours
+     * d oEmbed (U3, KTD6), et l appelant a besoin de savoir quel identifiant de file
+     * porte quelle video pour y poser ce que YouTube lui rendra.
      */
     queueAddAll(
       participantId: string,
       items: Array<{ videoId: string; title: string | null }>,
       nowMs: number,
-    ): { ok: true } | Failure {
+    ): { ok: true; added: Array<{ itemId: string; videoId: string }> } | Failure {
       if (!presence.has(participantId)) return fail("not_in_room", "participant inconnu dans cette room");
       if (queue.length + items.length > config.maxQueue) {
         return fail("queue_full",
           `cette playlist depasserait le plafond de ${config.maxQueue} morceaux de la file`);
       }
+      const added: Array<{ itemId: string; videoId: string }> = [];
       for (const item of items) {
-        queue.push({ itemId: `q${nextItemId++}`, videoId: item.videoId, addedBy: participantId, title: item.title });
+        const itemId = `q${nextItemId++}`;
+        added.push({ itemId, videoId: item.videoId });
+        queue.push({
+          itemId, videoId: item.videoId, addedBy: participantId, title: item.title,
+          channelTitle: null, thumbnailUrl: null, refused: false,
+        });
       }
       void nowMs;
-      return { ok: true };
+      return { ok: true, added };
     },
 
     queueRemove(participantId: string, itemId: string, nowMs: number): { ok: true } | Failure {
@@ -228,11 +243,43 @@ export function createRoom(code: string, config: RoomConfig) {
       return { ok: true };
     },
 
-    /** Renseigne le titre une fois connu. Sans effet si le morceau a ete retire entre-temps. */
-    setTitle(itemId: string, title: string): boolean {
+    /*
+     * Renseigne ce qu oEmbed a rendu, une fois connu (U3). Sans effet si le morceau a
+     * ete retire entre-temps. Rend true quand quelque chose a change, pour que
+     * l appelant ne rediffuse l etat que si l affichage bouge.
+     *
+     * Un champ nul n ecrase rien: sur un envoi de playlist le titre arrive avec le
+     * morceau, et une reponse oEmbed sans titre le ferait autrement disparaitre.
+     */
+    setInfo(
+      itemId: string,
+      info: { title: string | null; channelTitle: string | null; thumbnailUrl: string | null },
+    ): boolean {
       const item = queue.find((i) => i.itemId === itemId);
       if (!item) return false;
-      item.title = title;
+      let changed = false;
+      if (info.title !== null && info.title !== item.title) { item.title = info.title; changed = true; }
+      if (info.channelTitle !== null && info.channelTitle !== item.channelTitle) {
+        item.channelTitle = info.channelTitle;
+        changed = true;
+      }
+      if (info.thumbnailUrl !== null && info.thumbnailUrl !== item.thumbnailUrl) {
+        item.thumbnailUrl = info.thumbnailUrl;
+        changed = true;
+      }
+      return changed;
+    },
+
+    /*
+     * YouTube refuse de decrire ce morceau: prive, supprime, inexistant (R14). La
+     * room n en tire aucune conclusion et le laisse jouable; c est l ecriture de
+     * l historique qui lira ce drapeau, la room ignorant que la persistance existe
+     * (KTD9). Rend true seulement au premier marquage.
+     */
+    markRefused(itemId: string): boolean {
+      const item = queue.find((i) => i.itemId === itemId);
+      if (!item || item.refused) return false;
+      item.refused = true;
       return true;
     },
 

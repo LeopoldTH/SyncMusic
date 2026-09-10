@@ -206,17 +206,6 @@ function clampText(text: string | null): string | null {
 }
 
 /*
- * L instance de room est le prefixe de la cle persistee, <instanceId>#<itemId> (KTD4).
- * La regle vit ici, au meme endroit que le remplissage des lignes anciennes par la
- * migration 2: une seule definition de ce qu est une seance. Une cle sans separateur,
- * ou dont le prefixe serait vide, n en porte aucune.
- */
-function roomInstanceOf(roomItemKey: string): string | null {
-  const cut = roomItemKey.indexOf("#");
-  return cut > 0 ? roomItemKey.slice(0, cut) : null;
-}
-
-/*
  * La colonne des genres porte un tableau JSON de chaines (KTD12). Une valeur illisible
  * se relit comme « jamais interrogee », ce qui la fait redemander plus tard: un ecran
  * de statistiques ne doit pas tomber sur une seule ligne abimee.
@@ -429,6 +418,13 @@ export function openDatabase(path: string) {
         title: string | null;
         roomItemKey: string;
         /*
+         * La seance a laquelle l ecoute appartient (KTD4). Fournie par l appelant, qui
+         * construit la cle et a donc l instance en main: redecouper `<instance>#<item>`
+         * ici ferait connaitre ce format a deux modules, exactement ce que KTD4 evite.
+         * Le decoupage ne survit que dans la migration 2, pour les lignes anciennes.
+         */
+        roomInstanceId: string;
+        /*
          * Optionnels: oEmbed repond en fire-and-forget et peut arriver apres le depart
          * commun. Le morceau s enregistre quand meme, sans artiste ni miniature (R4).
          */
@@ -445,7 +441,7 @@ export function openDatabase(path: string) {
         clampText(entry.thumbnailUrl ?? null),
         nowMs,
         entry.roomItemKey,
-        roomInstanceOf(entry.roomItemKey),
+        entry.roomInstanceId,
       );
       return Number(result.changes) > 0;
     },
