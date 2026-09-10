@@ -569,6 +569,80 @@ describe("duree jouee accumulee (U4)", () => {
   });
 });
 
+/*
+ * U6, KTD5, KTD12. Le genre est une propriete de la video, pas de l ecoute: on liste
+ * des identifiants de video, pas des lignes, et un seul appel a YouTube remplit toutes
+ * les lignes qui partagent l identifiant, quel que soit le compte ou la seance.
+ */
+describe("genres par video (U6)", () => {
+  const ECOUTE = {
+    videoId: "dQw4w9WgXcQ", title: "Get Lucky",
+    roomItemKey: "inst-1#i1", roomInstanceId: "inst-1",
+  };
+
+  it("ne rend qu une fois une video jamais interrogee, meme ecoutee plusieurs fois", () => {
+    const db = fresh();
+    const user = withUser(db);
+    db.recordListen({ userId: user, ...ECOUTE }, T0);
+    db.recordListen({ userId: user, ...ECOUTE, roomItemKey: "inst-2#i1", roomInstanceId: "inst-2" }, T0 + 1);
+    db.recordListen({ userId: user, ...ECOUTE, videoId: "kJQP7kiw5Fk", roomItemKey: "inst-2#i2" }, T0 + 2);
+
+    expect(db.listVideoIdsWithoutGenres(10).sort()).toEqual(["dQw4w9WgXcQ", "kJQP7kiw5Fk"]);
+  });
+
+  it("rend les plus recemment jouees d abord et s arrete a la limite", () => {
+    const db = fresh();
+    const user = withUser(db);
+    ["a", "b", "c"].forEach((suffix, i) => db.recordListen({
+      userId: user, ...ECOUTE, videoId: `video-${suffix}`, roomItemKey: `inst-1#${suffix}`,
+    }, T0 + i));
+
+    // Une soiree d hier se remplit avant les archives quand la borne d un passage
+    // ne suffit pas a tout couvrir (U6).
+    expect(db.listVideoIdsWithoutGenres(2)).toEqual(["video-c", "video-b"]);
+  });
+
+  it("ecrit les genres sur toutes les lignes de la video, tous comptes et seances confondus", () => {
+    const db = fresh();
+    const leo = withUser(db);
+    const ami = db.upsertUser({ googleSub: "sub-ami", name: "Ami", email: null }, T0).id;
+    db.recordListen({ userId: leo, ...ECOUTE }, T0);
+    db.recordListen({ userId: ami, ...ECOUTE }, T0);
+    db.recordListen({ userId: leo, ...ECOUTE, roomItemKey: "inst-2#i1", roomInstanceId: "inst-2" }, T0 + 1);
+
+    expect(db.setVideoGenres("dQw4w9WgXcQ", ["Pop music", "Rock music"])).toBe(3);
+    expect(db.listHistory(leo, 10).map((entry) => entry.genres)).toEqual([
+      ["Pop music", "Rock music"], ["Pop music", "Rock music"],
+    ]);
+    expect(db.listHistory(ami, 10)[0]?.genres).toEqual(["Pop music", "Rock music"]);
+  });
+
+  /*
+   * KTD12: un tableau vide est une valeur pleine, « interrogee, aucun genre ». C est
+   * ce qui empeche de redemander la meme video a YouTube a chaque ouverture.
+   */
+  it("sort de la liste a interroger une video marquee sans genre", () => {
+    const db = fresh();
+    const user = withUser(db);
+    db.recordListen({ userId: user, ...ECOUTE }, T0);
+
+    db.setVideoGenres("dQw4w9WgXcQ", []);
+
+    expect(db.listVideoIdsWithoutGenres(10)).toEqual([]);
+    expect(db.listHistory(user, 10)[0]?.genres).toEqual([]);
+  });
+
+  it("ne touche pas les lignes d une autre video", () => {
+    const db = fresh();
+    const user = withUser(db);
+    db.recordListen({ userId: user, ...ECOUTE }, T0);
+    db.recordListen({ userId: user, ...ECOUTE, videoId: "kJQP7kiw5Fk", roomItemKey: "inst-1#i2" }, T0 + 1);
+
+    expect(db.setVideoGenres("dQw4w9WgXcQ", ["Pop music"])).toBe(1);
+    expect(db.listVideoIdsWithoutGenres(10)).toEqual(["kJQP7kiw5Fk"]);
+  });
+});
+
 describe("playlists", () => {
   it("cree une playlist et la liste avec son nombre de morceaux", () => {
     const db = fresh();
