@@ -13,11 +13,18 @@ describe("barre de compte", () => {
     expect(html).toContain("account-bar--vide");
   });
 
-  it("propose la connexion a un invite, en disant qu elle est facultative", () => {
+  /*
+   * Couvre R13. La phrase disait « Sans compte, tout marche pareil », ce que la
+   * memoire des ecoutes rend faux: le compte garde les soirees et permet de les
+   * revoir. Il reste facultatif, l accueil cesse seulement d affirmer le contraire.
+   */
+  it("dit a un invite ce que le compte apporte, sans affirmer qu il ne change rien", () => {
     const html = rendu(null);
     expect(html).toContain("Se connecter avec Google");
     expect(html).toContain("/auth/login");
-    expect(html).toContain("Sans compte, tout marche pareil");
+    expect(html).toContain("Facultatif");
+    expect(html).toContain("tes écoutes sont gardées et tu peux les revoir");
+    expect(html).not.toContain("tout marche pareil");
   });
 
   it("affiche le nom du compte et mene a l ecran de compte", () => {
@@ -25,5 +32,9 @@ describe("barre de compte", () => {
     expect(html).toContain("Leo");
     expect(html).toContain("/compte");
     expect(html).not.toContain("Se connecter avec Google");
+  });
+
+  it("mene a la memoire des ecoutes depuis le profil", () => {
+    expect(rendu({ name: "Leo" })).toContain("/memoire");
   });
 });

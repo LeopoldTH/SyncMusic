@@ -615,3 +615,113 @@ button, input, select {
   border: 2px solid var(--border); padding: 8px 10px;
 }
 .send-playlist__none { margin-bottom: 12px; }
+
+/* --- Memoire des ecoutes ---------------------------------------------------- */
+
+/*
+ * L ecran de statistiques (U8, R10). Coquille large — la meme que la room — plutot
+ * que la plaque etroite de l historique: il porte plusieurs modules cote a cote, ce
+ * que 420 px ne tiennent pas. L historique, lui, ne bouge pas.
+ *
+ * Aucune couleur ici ne sort des tokens de :root, et ni l accent ni la LED n y
+ * paraissent: l ecran ne porte aucune action primaire, et la LED verte ne dit que
+ * l etat de synchronisation.
+ */
+
+.memoire__bandeau {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.memoire__titre {
+  font-family: "Archivo Black", "Chivo Mono", sans-serif;
+  font-size: 1.35rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0;
+}
+
+/* --- Compteurs -------------------------------------------------------------- */
+
+.memoire__compteurs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 18px;
+}
+.memoire__compteur { display: flex; flex-direction: column; gap: 4px; }
+
+/* La grande valeur, signature de la charte: Archivo Black, jamais sous 14px. */
+.memoire__valeur {
+  font-family: "Archivo Black", "Chivo Mono", sans-serif;
+  font-size: 1.7rem;
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.memoire__legende {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+/* Les gardes d honnetete (R9) se posent sous leur module, jamais a cote. */
+.memoire__note { margin-top: 14px; }
+.memoire__note + .memoire__note { margin-top: 6px; }
+
+/* --- Classements ------------------------------------------------------------ */
+
+.memoire__grille {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 20px;
+  align-items: start;
+}
+
+.memoire__liste { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.memoire__rang {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 8px 10px; border: 1px solid var(--line);
+}
+.memoire__place {
+  color: var(--muted); font-size: 0.76rem; min-width: 1.4em;
+  font-variant-numeric: tabular-nums;
+}
+.memoire__nom { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Un identifiant technique garde sa casse d origine (charte). */
+.memoire__nom--brut { font-size: 0.85rem; color: var(--muted); }
+.memoire__mesure {
+  color: var(--muted); font-size: 0.76rem; letter-spacing: 0.06em; text-transform: uppercase;
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+
+/* --- Seances ----------------------------------------------------------------- */
+
+.memoire__seances { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.memoire__seance { border: 1px solid var(--line); padding: 12px 14px; }
+.memoire__entete {
+  display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  padding-bottom: 8px; margin-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.memoire__date { flex: 1; min-width: 0; font-weight: 700; letter-spacing: 0.04em; }
+
+.memoire__morceaux { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.memoire__morceau { display: flex; align-items: baseline; gap: 10px; }
+.memoire__artiste {
+  color: var(--muted); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 38%;
+}
+
+.memoire__suite { margin-top: 16px; }
+
+@media (max-width: 560px) {
+  .memoire__valeur { font-size: 1.4rem; }
+  .memoire__compteurs { gap: 14px; }
+  /* Zone tactile >= 44px, regle de la charte. */
+  .memoire__suite { padding: 12px 16px; }
+  .memoire__artiste { max-width: 50%; }
+}

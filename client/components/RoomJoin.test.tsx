@@ -30,7 +30,7 @@ describe("accueil, connecte", () => {
   it("retire le champ pseudo: le serveur ignorerait ce qu on y taperait (KD5)", () => {
     const html = rendu({ name: "Leo" });
     expect(html).not.toContain("Ton pseudo");
-    expect(html).toContain("Connecte comme");
+    expect(html).toContain("Connecté comme");
   });
 
   it("n exige plus de choisir un pseudo pour commencer", () => {

@@ -19,15 +19,23 @@ export function AccountBar({ account }: Props) {
     return (
       <div className="account-bar">
         <a className="btn account-bar__google" href="/auth/login">Se connecter avec Google</a>
-        <p className="hint account-bar__hint">Facultatif. Sans compte, tout marche pareil.</p>
+        {/*
+          * Le compte reste facultatif, mais il ne change plus rien de dire qu il ne
+          * change rien (R13): depuis la memoire des ecoutes, il garde les soirees et
+          * permet de les revoir. C est la seule chose qu il apporte, et elle se dit.
+          */}
+        <p className="hint account-bar__hint">
+          Facultatif. Avec un compte, tes écoutes sont gardées et tu peux les revoir.
+        </p>
       </div>
     );
   }
 
   return (
     <div className="account-bar">
-      <span className="account-bar__name">Connecte comme <strong>{account.name}</strong></span>
+      <span className="account-bar__name">Connecté comme <strong>{account.name}</strong></span>
       <Link className="account-bar__link" to="/compte">Mon compte</Link>
+      <Link className="account-bar__link" to="/memoire">Ma mémoire</Link>
       <Link className="account-bar__link" to="/historique">Mon historique</Link>
       <Link className="account-bar__link" to="/playlists">Mes playlists</Link>
     </div>
