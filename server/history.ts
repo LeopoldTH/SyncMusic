@@ -12,7 +12,7 @@
  */
 
 import type { Db, User } from "./db";
-import type { RoomSnapshot } from "./room";
+import type { PlayedSegment, RoomSnapshot } from "./room";
 
 export function recordCommonStart(args: {
   db: Db;
@@ -54,4 +54,35 @@ export function recordCommonStart(args: {
       args.nowMs,
     );
   }
+}
+
+/*
+ * Ecriture de la duree quand un morceau cesse d etre courant (U4 memoire des ecoutes,
+ * R1). La room a mesure avant de muter (KTD1) et rend le segment joue; c est ici qu on
+ * construit la cle, comme au depart commun, et la seule ici (KTD4).
+ *
+ * Aucun compte en entree, et c est voulu (U4): la meme fonction sert a la destruction
+ * d une room, ou plus aucune session n existe. Les lignes visees n existent que pour
+ * des comptes connectes, le depart commun ayant deja applique la garde. Un morceau
+ * qu aucun compte n a entendu ne touche donc rien.
+ *
+ * La duree s ajoute, elle ne remplace pas (KTD3): un morceau rappele par « precedent »
+ * porte la meme cle, et un remplacement lui ferait perdre sa premiere ecoute.
+ */
+export function recordPlayedSegment(args: {
+  db: Db;
+  /** L instance de room, jamais le code a quatre lettres, qui se recycle (KTD6). */
+  instanceId: string;
+  played: PlayedSegment;
+}): void {
+  const { item } = args.played;
+  args.db.addListenedMs({
+    roomItemKey: `${args.instanceId}#${item.itemId}`,
+    listenedMs: args.played.listenedMs,
+    // Rattrapage d une reponse oEmbed arrivee apres le depart commun: la file les
+    // connait peut-etre maintenant, et la ligne est deja en ecriture.
+    title: item.title,
+    channelTitle: item.channelTitle,
+    thumbnailUrl: item.thumbnailUrl,
+  });
 }

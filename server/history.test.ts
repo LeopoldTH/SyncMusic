@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openDatabase, type Db, type User } from "./db";
-import { recordCommonStart } from "./history";
+import { recordCommonStart, recordPlayedSegment } from "./history";
 import { createRoom, type RoomSnapshot } from "./room";
 import { fetchEachVideoInfo } from "./videoInfo";
 
@@ -272,6 +272,205 @@ describe("de l ajout a la ligne d historique (U3)", () => {
 
     expect(db.listHistory(leo.id, 10)[0]).toMatchObject({
       videoId: "kJQP7kiw5Fk", title: null, channelTitle: null, thumbnailUrl: null,
+    });
+  });
+});
+
+/*
+ * U4, R1. Le trajet complet d une duree: la room mesure avant de muter (KTD1), rend le
+ * segment joue, et c est l appelant qui ecrit (KTD9). Les trois exemples d acceptation
+ * sur la duree se jouent ici, seul endroit ou room et base se rencontrent.
+ */
+describe("duree jouee, de la room a la ligne (U4)", () => {
+  let db: Db;
+  let leo: User;
+
+  beforeEach(() => {
+    db = openDatabase(":memory:");
+    leo = db.upsertUser({ googleSub: "sub-leo", name: "Leo", email: null }, T0);
+  });
+
+  afterEach(() => db.close());
+
+  /** Un depart commun: la barriere s ouvre, tout le monde est pret, la ligne s ecrit. */
+  function depart(
+    room: ReturnType<typeof createRoom>,
+    users: Array<User | null>,
+    nowMs: number,
+    positionMs = 0,
+  ): void {
+    const attente = room.resumeAt(positionMs, nowMs);
+    room.ready("leo", attente.barrierId, nowMs);
+    recordCommonStart({ db, instanceId: "i1", snapshot: room.state(), users, nowMs });
+  }
+
+  /*
+   * Le raccordement du transport (server/index.ts, case "control_transport"): la room
+   * rend le segment joue, l appelant l ecrit. Aucune session, aucun compte ne passe
+   * par la.
+   */
+  function transport(
+    room: ReturnType<typeof createRoom>,
+    action: "play" | "pause" | "next" | "previous",
+    nowMs: number,
+  ): void {
+    const played = room.control(action, nowMs);
+    if (played) recordPlayedSegment({ db, instanceId: "i1", played });
+  }
+
+  /** Deux morceaux, depart commun emis a T0 + leadMs, position 0. */
+  function enLecture(users: Array<User | null>) {
+    const room = createRoom("ABCD", CFG);
+    room.join("leo", T0);
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    room.queueAdd("leo", "dQw4w9WgXcQ", T0);
+    room.control("play", T0);
+    depart(room, users, T0);
+    return room;
+  }
+
+  const ligneDe = (videoId: string) =>
+    db.listHistory(leo.id, 10).find((e) => e.videoId === videoId);
+
+  it("compte trente secondes pour un morceau mis en pause dix minutes puis zappe (AE1, R1)", () => {
+    const room = enLecture([leo]);
+    const pause = T0 + CFG.leadMs + 10_000;
+    transport(room, "pause", pause);
+    const reprise = pause + 600_000;
+    transport(room, "play", reprise);
+    depart(room, [leo], reprise, 10_000);
+
+    transport(room, "next", reprise + CFG.leadMs + 20_000);
+
+    expect(ligneDe("kJQP7kiw5Fk")?.listenedMs).toBe(30_000);
+  });
+
+  it("compte dix secondes pour un morceau zappe au bout de dix secondes (AE2, R1)", () => {
+    const room = enLecture([leo]);
+
+    transport(room, "next", T0 + CFG.leadMs + 10_000);
+
+    expect(ligneDe("kJQP7kiw5Fk")?.listenedMs).toBe(10_000);
+  });
+
+  it("additionne les deux passages d un morceau rappele par « precedent » (AE7, R1, KTD3)", () => {
+    const room = enLecture([leo]);
+    const zap = T0 + CFG.leadMs + 30_000;
+    transport(room, "next", zap);
+    depart(room, [leo], zap);
+    const retour = zap + CFG.leadMs + 4_000;
+    transport(room, "previous", retour);
+    depart(room, [leo], retour);
+
+    transport(room, "next", retour + CFG.leadMs + 20_000);
+
+    expect(ligneDe("kJQP7kiw5Fk")?.listenedMs).toBe(50_000);
+    expect(ligneDe("dQw4w9WgXcQ")?.listenedMs).toBe(4_000);
+  });
+
+  it("ecrit la duree sur une fin naturelle de piste comme sur un zap (R1)", () => {
+    const room = enLecture([leo]);
+
+    const outcome = room.trackEnded("q1", T0 + CFG.leadMs + 12_000);
+    if (outcome.played) recordPlayedSegment({ db, instanceId: "i1", played: outcome.played });
+
+    expect(ligneDe("kJQP7kiw5Fk")?.listenedMs).toBe(12_000);
+  });
+
+  it("ecrit la duree du dernier morceau quand le suivant vide la lecture (R7)", () => {
+    const room = enLecture([leo]);
+    const zap = T0 + CFG.leadMs + 10_000;
+    transport(room, "next", zap);
+    depart(room, [leo], zap);
+
+    transport(room, "next", zap + CFG.leadMs + 8_000);
+
+    expect(room.state().currentItemId).toBe(null);
+    expect(ligneDe("dQw4w9WgXcQ")?.listenedMs).toBe(8_000);
+  });
+
+  it("ne laisse ni ligne ni duree pour un participant non connecte (R10)", () => {
+    const room = enLecture([null]);
+
+    transport(room, "next", T0 + CFG.leadMs + 10_000);
+
+    expect(db.listHistory(leo.id, 10)).toHaveLength(0);
+  });
+
+  it("porte la meme duree sur la ligne de chacun des deux comptes presents (R1)", () => {
+    const ami = db.upsertUser({ googleSub: "sub-ami", name: "Ami", email: null }, T0);
+    const room = enLecture([leo, ami]);
+
+    transport(room, "next", T0 + CFG.leadMs + 25_000);
+
+    expect(db.listHistory(leo.id, 10)[0]?.listenedMs).toBe(25_000);
+    expect(db.listHistory(ami.id, 10)[0]?.listenedMs).toBe(25_000);
+  });
+
+  /*
+   * Le piege de KTD3: les departs communs se repetent, et l ecriture au depart ne doit
+   * jamais ramener a zero une duree deja mesuree.
+   */
+  it("garde la duree deja mesuree quand un nouveau depart commun reprend le morceau (KTD3)", () => {
+    const room = enLecture([leo]);
+    const zap = T0 + CFG.leadMs + 30_000;
+    transport(room, "next", zap);
+    transport(room, "previous", zap + 1_000);
+
+    depart(room, [leo], zap + 1_000);
+
+    expect(ligneDe("kJQP7kiw5Fk")?.listenedMs).toBe(30_000);
+  });
+
+  it("complete le nom de chaine arrive apres le depart commun (R2, U4)", () => {
+    const room = enLecture([leo]);
+    expect(ligneDe("kJQP7kiw5Fk")?.channelTitle).toBeNull();
+    // La reponse oEmbed arrive apres coup: la file la connait, la ligne non.
+    room.setInfo("q1", {
+      title: null,
+      channelTitle: "LuisFonsiVEVO",
+      thumbnailUrl: "https://i.ytimg.com/vi/kJQP7kiw5Fk/hqdefault.jpg",
+    });
+
+    transport(room, "next", T0 + CFG.leadMs + 10_000);
+
+    expect(ligneDe("kJQP7kiw5Fk")).toMatchObject({
+      channelTitle: "LuisFonsiVEVO",
+      thumbnailUrl: "https://i.ytimg.com/vi/kJQP7kiw5Fk/hqdefault.jpg",
+      listenedMs: 10_000,
+    });
+  });
+
+  /*
+   * L accumulation met a jour, elle ne cree jamais: un morceau que YouTube refuse de
+   * decrire n a pas de ligne au depart commun (R14), et sa duree ne doit pas lui en
+   * fabriquer une.
+   */
+  it("ne cree aucune ligne pour un morceau refuse par YouTube (AE11, R14)", () => {
+    const room = enLecture([leo]);
+    room.markRefused("q1");
+    // La ligne de q1 existe deja, ecrite avant le refus: c est q2 qui n en aura pas.
+    const zap = T0 + CFG.leadMs + 10_000;
+    transport(room, "next", zap);
+    room.markRefused("q2");
+    depart(room, [leo], zap);
+
+    transport(room, "next", zap + CFG.leadMs + 5_000);
+
+    expect(db.listHistory(leo.id, 10).map((e) => e.videoId)).toEqual(["kJQP7kiw5Fk"]);
+  });
+
+  it("n ecrase pas un titre deja ecrit par une valeur vide arrivee plus tard", () => {
+    recordCommonStart({ db, instanceId: "i1", snapshot: snapshot(), users: [leo], nowMs: T0 });
+
+    recordPlayedSegment({
+      db,
+      instanceId: "i1",
+      played: { item: item({ title: null }), listenedMs: 5_000 },
+    });
+
+    expect(db.listHistory(leo.id, 10)[0]).toMatchObject({
+      title: "Despacito", listenedMs: 5_000,
     });
   });
 });

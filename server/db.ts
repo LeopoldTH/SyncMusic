@@ -296,6 +296,28 @@ export function openDatabase(path: string) {
         (user_id, video_id, title, channel_title, thumbnail_url, played_at, room_item_key, room_instance_id)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `),
+    /*
+     * Accumulation de la duree (U4, KTD3). Chemin distinct de `recordListen`: celui-la
+     * cree la ligne et garde son premier horodatage, celui-ci ajoute a ce qui y est
+     * deja. Un `SET listened_ms = ?` ecraserait une duree juste par celle de la
+     * seconde ecoute quand un morceau redevient courant dans la meme seance (AE7).
+     *
+     * `COALESCE` sur les trois textes: on complete ce que la ligne porte a vide quand
+     * oEmbed a repondu apres le depart commun, sans jamais ecraser une valeur presente.
+     *
+     * La cle de morceau seule, sans compte (U4): a la destruction d une room plus
+     * aucune session n existe, et les lignes n existent deja que pour des comptes
+     * connectes, le depart commun appliquant la garde. Pas d index sur cette colonne
+     * seule: quelques milliers de lignes, une ecriture par fin de morceau.
+     */
+    addListenedMs: db.prepare(`
+      UPDATE history_entries
+      SET listened_ms   = COALESCE(listened_ms, 0) + ?,
+          title         = COALESCE(title, ?),
+          channel_title = COALESCE(channel_title, ?),
+          thumbnail_url = COALESCE(thumbnail_url, ?)
+      WHERE room_item_key = ?
+    `),
     historyPage: db.prepare(`
       SELECT id, video_id, title, played_at, listened_ms, channel_title, thumbnail_url,
              genres, room_instance_id
@@ -444,6 +466,36 @@ export function openDatabase(path: string) {
         entry.roomInstanceId,
       );
       return Number(result.changes) > 0;
+    },
+
+    /*
+     * Ajoute le temps joue a toutes les lignes de ce morceau, celle de chaque compte
+     * present (U4, R1). Aucun compte en entree: l appelant peut etre la destruction
+     * d une room, ou plus aucune session n existe.
+     *
+     * La duree ne decroit jamais (R1): une valeur negative n enleve rien. Rend le
+     * nombre de lignes touchees, zero quand aucun compte connecte n ecoutait.
+     */
+    addListenedMs(entry: {
+      roomItemKey: string;
+      listenedMs: number;
+      /*
+       * Rattrapage d une reponse oEmbed arrivee apres le depart commun: ces trois
+       * champs ne remplissent que ce que la ligne porte a vide. Gratuit, la ligne
+       * etant deja en ecriture.
+       */
+      title?: string | null;
+      channelTitle?: string | null;
+      thumbnailUrl?: string | null;
+    }): number {
+      const result = statements.addListenedMs.run(
+        Math.max(0, Math.round(entry.listenedMs)),
+        clampText(entry.title ?? null),
+        clampText(entry.channelTitle ?? null),
+        clampText(entry.thumbnailUrl ?? null),
+        entry.roomItemKey,
+      );
+      return Number(result.changes);
     },
 
     /** Du plus recent au plus ancien. `after` continue la page precedente (R6). */

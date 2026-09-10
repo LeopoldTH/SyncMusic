@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import { createRoom } from "./room";
 
 const CFG = { maxParticipants: 2, maxWaitMs: 45_000, leadMs: 500, graceMs: 30_000, maxQueue: 100 };
@@ -502,7 +503,8 @@ describe("fin de piste", () => {
     const room = twoTracks();
     const first = room.state().currentItemId;
     const outcome = room.trackEnded(first ?? "", T0 + 1_000);
-    expect(outcome).toEqual({ advanced: true, hasNext: true });
+    expect(outcome.advanced).toBe(true);
+    expect(outcome.hasNext).toBe(true);
     expect(room.state().currentItemId).not.toBe(first);
   });
 
@@ -520,7 +522,8 @@ describe("fin de piste", () => {
     const room = twoTracks();
     room.trackEnded(room.state().currentItemId ?? "", T0 + 1_000);
     const last = room.trackEnded(room.state().currentItemId ?? "", T0 + 2_000);
-    expect(last).toEqual({ advanced: true, hasNext: false });
+    expect(last.advanced).toBe(true);
+    expect(last.hasNext).toBe(false);
     expect(room.state().playing).toBe(false);
     expect(room.state().currentItemId).toBe(null);
   });
@@ -742,5 +745,160 @@ describe("gel de la timeline pendant une stagnation (U1)", () => {
     expect(room.state().playing).toBe(true);
     // Depart commun a T0 + 41 500, puis 10 s de lecture.
     expect(room.positionNow(T0 + 51_500)).toBe(39_000);
+  });
+});
+
+/*
+ * U4, R1, KTD1. La duree d une ecoute se lit dans l entonnoir de transport, avant que
+ * la mutation n efface ce qu il y avait a mesurer: `next` et `previous` posent
+ * `timeline = null` et la position retombe a zero, donc lire apres, c est enregistrer
+ * zero. Les quatre chemins qui mettent fin a une ecoute passent par `control`.
+ *
+ * La room ne persiste rien (KTD9): elle rend le segment joue, l appelant l ecrit.
+ */
+describe("duree jouee rendue par le transport (U4)", () => {
+  /** Deux morceaux, depart commun emis a T0 + leadMs, position 0. */
+  function enLecture() {
+    const room = createRoom("ABCD", CFG);
+    room.join("leo", T0);
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    room.queueAdd("leo", "dQw4w9WgXcQ", T0);
+    room.control("play", T0);
+    const depart = room.resumeAt(0, T0);
+    room.ready("leo", depart.barrierId, T0);
+    return room;
+  }
+
+  /** Un depart commun de plus, a la position donnee: ce que fait le transport. */
+  function repart(room: ReturnType<typeof createRoom>, positionMs: number, nowMs: number) {
+    const attente = room.resumeAt(positionMs, nowMs);
+    room.ready("leo", attente.barrierId, nowMs);
+  }
+
+  it("compte le temps joue, pauses exclues, quand le morceau est zappe (AE1, R1)", () => {
+    const room = enLecture();
+    const pause = T0 + CFG.leadMs + 10_000;
+    room.control("pause", pause);
+    const reprise = pause + 600_000; // dix minutes d arret
+    room.control("play", reprise);
+    repart(room, 10_000, reprise);
+
+    const joue = room.control("next", reprise + CFG.leadMs + 20_000);
+
+    expect(joue?.item.itemId).toBe("q1");
+    expect(joue?.listenedMs).toBe(30_000);
+  });
+
+  it("lit la duree avant la mutation de la timeline, pas apres (AE2, KTD1)", () => {
+    const room = enLecture();
+    const zap = T0 + CFG.leadMs + 10_000;
+
+    const joue = room.control("next", zap);
+
+    expect(joue?.listenedMs).toBe(10_000);
+    // Lire apres la mutation ne rendrait plus rien: le nouveau morceau part de zero.
+    expect(room.positionNow(zap)).toBe(0);
+  });
+
+  it("rend le morceau quitte par « precedent », pas celui qui redevient courant (AE7)", () => {
+    const room = enLecture();
+    const zap = T0 + CFG.leadMs + 30_000;
+    room.control("next", zap);
+    repart(room, 0, zap);
+
+    const joue = room.control("previous", zap + CFG.leadMs + 5_000);
+
+    expect(joue?.item.itemId).toBe("q2");
+    expect(joue?.listenedMs).toBe(5_000);
+    expect(room.state().currentItemId).toBe("q1");
+  });
+
+  it("ferme l ecoute en cours meme quand « precedent » relance le premier morceau", () => {
+    // currentIndex reste a zero, mais la timeline repart de zero: l ecoute est finie.
+    const room = enLecture();
+
+    const joue = room.control("previous", T0 + CFG.leadMs + 8_000);
+
+    expect(joue?.item.itemId).toBe("q1");
+    expect(joue?.listenedMs).toBe(8_000);
+    expect(room.state().currentItemId).toBe("q1");
+  });
+
+  it("rend la duree du dernier morceau quand le suivant vide la lecture (R7)", () => {
+    const room = enLecture();
+    const zap = T0 + CFG.leadMs + 10_000;
+    room.control("next", zap);
+    repart(room, 0, zap);
+
+    const joue = room.control("next", zap + CFG.leadMs + 8_000);
+
+    expect(joue?.item.itemId).toBe("q2");
+    expect(joue?.listenedMs).toBe(8_000);
+    expect(room.state().currentItemId).toBe(null);
+  });
+
+  it("rend la meme duree sur une fin naturelle de piste que sur un zap", () => {
+    const room = enLecture();
+
+    const outcome = room.trackEnded("q1", T0 + CFG.leadMs + 12_000);
+
+    expect(outcome.played?.item.itemId).toBe("q1");
+    expect(outcome.played?.listenedMs).toBe(12_000);
+  });
+
+  it("ne rend aucune duree sur un second rapport de fin de piste", () => {
+    const room = enLecture();
+    room.trackEnded("q1", T0 + CFG.leadMs + 12_000);
+
+    const second = room.trackEnded("q1", T0 + CFG.leadMs + 12_100);
+
+    expect(second.played).toBe(null);
+  });
+
+  it("ne met fin a aucune ecoute sur une pause ni sur une reprise", () => {
+    const room = enLecture();
+
+    expect(room.control("pause", T0 + CFG.leadMs + 5_000)).toBe(null);
+    expect(room.control("play", T0 + CFG.leadMs + 6_000)).toBe(null);
+  });
+
+  it("ne rend rien quand aucun morceau n etait courant", () => {
+    const room = createRoom("ABCD", CFG);
+    room.join("leo", T0);
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+
+    expect(room.control("previous", T0 + 1_000)).toBe(null);
+    expect(room.control("next", T0 + 1_000)).toBe(null); // rien avant q1
+  });
+
+  /*
+   * L element de file part avec le segment: la ligne d historique a pu s ecrire avant
+   * qu oEmbed reponde, et c est ici qu on peut encore la completer (U4).
+   */
+  it("rend l element de file avec ce qu il porte au moment ou l ecoute s arrete", () => {
+    const room = enLecture();
+    room.setInfo("q1", {
+      title: "Despacito",
+      channelTitle: "LuisFonsiVEVO",
+      thumbnailUrl: "https://i.ytimg.com/vi/kJQP7kiw5Fk/hqdefault.jpg",
+    });
+
+    const joue = room.control("next", T0 + CFG.leadMs + 3_000);
+
+    expect(joue?.item).toMatchObject({
+      title: "Despacito",
+      channelTitle: "LuisFonsiVEVO",
+      thumbnailUrl: "https://i.ytimg.com/vi/kJQP7kiw5Fk/hqdefault.jpg",
+    });
+  });
+
+  /*
+   * KTD9. La room ignore que la persistance existe: la duree remonte par valeur de
+   * retour. Un import ici suffirait a rendre la room intestable sans base.
+   */
+  it("n importe ni la base ni l historique (KTD9)", () => {
+    const source = readFileSync(new URL("./room.ts", import.meta.url), "utf8");
+
+    expect(source).not.toMatch(/from\s+"\.\/(db|history)"/);
   });
 });
