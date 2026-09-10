@@ -444,6 +444,131 @@ describe("historique", () => {
   });
 });
 
+/*
+ * U4, KTD3. L accumulation est un chemin distinct de la deduplication: le depart
+ * commun cree la ligne et garde son premier horodatage, la fin de morceau ajoute a la
+ * duree. Elle vise la cle de morceau seule, sans compte: a la destruction d une room
+ * plus aucune session n existe, et les lignes n existent que pour des comptes
+ * connectes puisque le depart commun applique deja la garde.
+ */
+describe("duree jouee accumulee (U4)", () => {
+  const ECOUTE = {
+    videoId: "dQw4w9WgXcQ", title: "Get Lucky",
+    roomItemKey: "inst-1#i1", roomInstanceId: "inst-1",
+  };
+
+  it("ajoute la duree a une ligne existante sans qu aucun compte soit fourni (U4)", () => {
+    const db = fresh();
+    const user = withUser(db);
+    db.recordListen({ userId: user, ...ECOUTE }, T0);
+
+    expect(db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 10_000 })).toBe(1);
+    expect(db.listHistory(user, 10)[0]?.listenedMs).toBe(10_000);
+  });
+
+  it("additionne au lieu de remplacer quand le morceau est rejoue (AE7, KTD3)", () => {
+    const db = fresh();
+    const user = withUser(db);
+    db.recordListen({ userId: user, ...ECOUTE }, T0);
+
+    db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 30_000 });
+    db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 20_000 });
+
+    expect(db.listHistory(user, 10)[0]?.listenedMs).toBe(50_000);
+  });
+
+  it("ne fait jamais decroitre une duree (R1)", () => {
+    const db = fresh();
+    const user = withUser(db);
+    db.recordListen({ userId: user, ...ECOUTE }, T0);
+    db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 30_000 });
+
+    db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: -10_000 });
+
+    expect(db.listHistory(user, 10)[0]?.listenedMs).toBe(30_000);
+  });
+
+  it("touche la ligne de chaque compte qui porte la cle, avec la meme duree", () => {
+    const db = fresh();
+    const leo = withUser(db);
+    const ami = db.upsertUser({ googleSub: "sub-ami", name: "Ami", email: null }, T0).id;
+    db.recordListen({ userId: leo, ...ECOUTE }, T0);
+    db.recordListen({ userId: ami, ...ECOUTE }, T0);
+
+    expect(db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 25_000 })).toBe(2);
+    expect(db.listHistory(leo, 10)[0]?.listenedMs).toBe(25_000);
+    expect(db.listHistory(ami, 10)[0]?.listenedMs).toBe(25_000);
+  });
+
+  it("n ecrit rien quand aucune ligne ne porte cette cle", () => {
+    const db = fresh();
+    const user = withUser(db);
+    db.recordListen({ userId: user, ...ECOUTE }, T0);
+
+    expect(db.addListenedMs({ roomItemKey: "inst-9#i1", listenedMs: 10_000 })).toBe(0);
+    expect(db.listHistory(user, 10)[0]?.listenedMs).toBeNull();
+  });
+
+  it("ne touche ni au premier horodatage ni aux autres seances", () => {
+    const db = fresh();
+    const user = withUser(db);
+    db.recordListen({ userId: user, ...ECOUTE }, T0);
+    db.recordListen({
+      userId: user, ...ECOUTE, roomItemKey: "inst-2#i1", roomInstanceId: "inst-2",
+    }, T0 + JOUR);
+
+    db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 10_000 });
+
+    const [recente, ancienne] = db.listHistory(user, 10);
+    expect(ancienne).toMatchObject({ playedAt: T0, listenedMs: 10_000 });
+    expect(recente).toMatchObject({ playedAt: T0 + JOUR, listenedMs: null });
+  });
+
+  it("complete le nom de chaine et la miniature que la ligne portait a vide (R2, R3)", () => {
+    const db = fresh();
+    const user = withUser(db);
+    db.recordListen({ userId: user, ...ECOUTE, title: null }, T0);
+
+    db.addListenedMs({
+      roomItemKey: "inst-1#i1",
+      listenedMs: 10_000,
+      title: "Get Lucky",
+      channelTitle: "DaftPunkVEVO",
+      thumbnailUrl: "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+    });
+
+    expect(db.listHistory(user, 10)[0]).toMatchObject({
+      title: "Get Lucky",
+      channelTitle: "DaftPunkVEVO",
+      thumbnailUrl: "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+    });
+  });
+
+  it("n ecrase jamais une valeur deja presente par une valeur vide", () => {
+    const db = fresh();
+    const user = withUser(db);
+    db.recordListen({ userId: user, ...ECOUTE, channelTitle: "DaftPunkVEVO" }, T0);
+
+    db.addListenedMs({
+      roomItemKey: "inst-1#i1", listenedMs: 10_000, title: null, channelTitle: null,
+    });
+
+    expect(db.listHistory(user, 10)[0]).toMatchObject({
+      title: "Get Lucky", channelTitle: "DaftPunkVEVO",
+    });
+  });
+
+  it("tronque un titre trop long comme le fait l ecriture au depart commun", () => {
+    const db = fresh();
+    const user = withUser(db);
+    db.recordListen({ userId: user, ...ECOUTE, title: null }, T0);
+
+    db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 1, title: "x".repeat(500) });
+
+    expect(db.listHistory(user, 10)[0]?.title).toHaveLength(LIMITS.titleChars);
+  });
+});
+
 describe("playlists", () => {
   it("cree une playlist et la liste avec son nombre de morceaux", () => {
     const db = fresh();

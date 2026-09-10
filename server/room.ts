@@ -31,6 +31,18 @@ export interface RoomSnapshot {
   playing: boolean;
 }
 
+/*
+ * Ce qu un morceau a ete joue dans la room avant de cesser d etre courant (U4, R1).
+ * La room ne persiste rien (KTD9): la duree remonte par valeur de retour, et
+ * l element de file part avec elle, l appelant ayant a completer ce que sa ligne
+ * d historique portait a vide.
+ */
+export interface PlayedSegment {
+  item: QueueItem;
+  /** Temps joue depuis le dernier depart commun, pauses exclues (R1). */
+  listenedMs: number;
+}
+
 interface Presence {
   name: string;
   connected: boolean;
@@ -102,6 +114,18 @@ export function createRoom(code: string, config: RoomConfig) {
   function currentItemId(): string | null {
     if (currentIndex === null) return null;
     return queue[currentIndex]?.itemId ?? null;
+  }
+
+  /*
+   * Le segment joue du morceau courant, a lire avant toute mutation (U4, KTD1). Rend
+   * null quand rien n etait courant: il n y a alors aucune ecoute a fermer.
+   */
+  function playedSegment(nowMs: number): PlayedSegment | null {
+    const itemId = currentItemId();
+    if (itemId === null) return null;
+    const item = queue.find((i) => i.itemId === itemId);
+    if (item === undefined) return null;
+    return { item, listenedMs: positionAt(nowMs) };
   }
 
   function snapshot(): RoomSnapshot {
@@ -283,7 +307,16 @@ export function createRoom(code: string, config: RoomConfig) {
       return true;
     },
 
-    control(action: "play" | "pause" | "next" | "previous", nowMs: number): void {
+    /*
+     * L entonnoir de transport, et le seul point ou une ecoute prend fin (U4, KTD1):
+     * `next`, `previous`, la fin de file et `trackEnded`, qui delegue ici, y passent
+     * tous. Rend le segment joue du morceau qui vient de cesser d etre courant, lu
+     * avant la mutation: `next` et `previous` posent `timeline = null` et la position
+     * retombe a zero, donc lire apres, c est enregistrer zero.
+     *
+     * L appelant ecrit, la room ignorant que la persistance existe (KTD9).
+     */
+    control(action: "play" | "pause" | "next" | "previous", nowMs: number): PlayedSegment | null {
       if (action === "play") {
         if (currentIndex === null && queue.length > 0) currentIndex = 0;
         /*
@@ -293,7 +326,8 @@ export function createRoom(code: string, config: RoomConfig) {
          */
         timeline = { positionMs: positionAt(nowMs), startAtServerMs: nowMs };
         playing = currentIndex !== null;
-        return;
+        // Une reprise ne met fin a aucune ecoute: le morceau courant ne change pas.
+        return null;
       }
       if (action === "pause") {
         /*
@@ -302,20 +336,29 @@ export function createRoom(code: string, config: RoomConfig) {
          */
         timeline = { positionMs: positionAt(nowMs), startAtServerMs: nowMs };
         playing = false;
-        return;
+        // Une pause suspend l ecoute, elle ne la termine pas: la duree s ecrira quand
+        // le morceau cessera d etre courant, pause deduite.
+        return null;
       }
+      // La mesure d abord, la mutation ensuite (KTD1).
+      const played = playedSegment(nowMs);
       if (action === "next") {
         const from = currentIndex ?? -1;
         const to = from + 1;
         timeline = null; // un nouveau morceau repart de son debut
-        if (to >= queue.length) { currentIndex = null; playing = false; return; }
+        if (to >= queue.length) { currentIndex = null; playing = false; return played; }
         currentIndex = to;
-        return;
+        return played;
       }
       // previous
-      if (currentIndex === null) return;
+      if (currentIndex === null) return null;
+      /*
+       * Sur le premier morceau, `previous` le relance depuis son debut: il reste
+       * courant, mais l ecoute en cours est bien finie et se compte (R1, KTD3).
+       */
       timeline = null;
       currentIndex = Math.max(0, currentIndex - 1);
+      return played;
     },
 
     clockProbe(clientSentAt: number, receivedAtServerMs: number) {
@@ -396,12 +439,15 @@ export function createRoom(code: string, config: RoomConfig) {
 
     /*
      * Fin de piste annoncee par un client. Idempotent: le second rapport porte
-     * l identifiant du morceau precedent, donc il ne fait rien.
+     * l identifiant du morceau precedent, donc il ne fait rien, et ne rend aucune
+     * duree qui serait comptee deux fois (U4).
      */
-    trackEnded(itemId: string, nowMs: number): { advanced: boolean; hasNext: boolean } {
-      if (itemId !== currentItemId()) return { advanced: false, hasNext: false };
-      this.control("next", nowMs);
-      return { advanced: true, hasNext: currentItemId() !== null };
+    trackEnded(itemId: string, nowMs: number):
+      { advanced: boolean; hasNext: boolean; played: PlayedSegment | null } {
+      if (itemId !== currentItemId()) return { advanced: false, hasNext: false, played: null };
+      // Delegue a l entonnoir, seul point ou la duree se mesure (KTD1).
+      const played = this.control("next", nowMs);
+      return { advanced: true, hasNext: currentItemId() !== null, played };
     },
 
     /** Un arrivant en cours de lecture doit passer par un depart commun (F1). */

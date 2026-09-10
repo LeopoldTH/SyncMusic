@@ -18,7 +18,8 @@ import { searchVideos } from "./youtubeSearch";
 import { createSearchBudget } from "./searchBudget";
 import { LIMITS, openDatabase, resolveDbPath, type HistoryCursor, type User } from "./db";
 import { createAuth, readAuthConfig, readBody, sameOrigin, sendJson } from "./auth";
-import { recordCommonStart } from "./history";
+import { recordCommonStart, recordPlayedSegment } from "./history";
+import type { PlayedSegment } from "./room";
 
 const PORT = Number(process.env["PORT"] ?? 8787);
 
@@ -447,6 +448,17 @@ function broadcastStart(
   });
 }
 
+/*
+ * Un morceau vient de cesser d etre courant: sa duree s ajoute a la ligne de chaque
+ * compte qui l ecoutait (U4, R1). La room a mesure avant de muter et rend le segment;
+ * c est ici qu on ecrit, elle ignore que la persistance existe (KTD9).
+ */
+function recordPlayed(code: string, played: PlayedSegment): void {
+  const instanceId = registry.instanceOf(code);
+  if (instanceId === undefined) return;
+  recordPlayedSegment({ db, instanceId, played });
+}
+
 function attachSocket(socket: WebSocket, user: User | null): void {
   sessions.set(socket, { participantId: newParticipantId(), code: null, user });
   // Budget glissant de messages: une connexion qui inonde est fermee, pas servie.
@@ -565,6 +577,7 @@ function attachSocket(socket: WebSocket, user: User | null): void {
       }
       case "track_ended": {
         const outcome = room.trackEnded(message.itemId, now);
+        if (outcome.played) recordPlayed(code, outcome.played);
         if (!outcome.advanced) return; // rapport en double: le morceau a deja change
         broadcastState(code, room);
         if (!outcome.hasNext) return;  // file terminee: la lecture s arrete (R7)
@@ -609,7 +622,8 @@ function attachSocket(socket: WebSocket, user: User | null): void {
         return;
       }
       case "control_transport": {
-        room.control(message.action, now);
+        const played = room.control(message.action, now);
+        if (played) recordPlayed(code, played);
         broadcastState(code, room);
         // Toute reprise passe par un depart commun (R11), sans exception.
         if (message.action === "play" || message.action === "next" || message.action === "previous") {
