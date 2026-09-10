@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { openDatabase, resolveDbPath, LIMITS, type Db } from "./db";
+import { openDatabase, resolveDbPath, LIMITS, MIGRATIONS, type Db } from "./db";
 
 const T0 = 1_700_000_000_000;
 const JOUR = 24 * 60 * 60 * 1000;
@@ -30,6 +30,29 @@ function withUser(db: Db): number {
   return db.upsertUser(PROFIL, T0).id;
 }
 
+/*
+ * Une base arretee a la migration livree, comme celles d avant la memoire des ecoutes
+ * (U2). Elle sert a jouer la migration 2 sur des lignes existantes plutot que sur du
+ * vide: c est le seul cas ou le remplissage de l instance de room a quelque chose a
+ * faire. Le compte porte l id 1, que les tests reutilisent.
+ */
+function baseVersion1(path: string, roomItemKeys: readonly string[]): void {
+  const raw = new DatabaseSync(path);
+  raw.exec(MIGRATIONS[0]!);
+  raw.exec("PRAGMA user_version = 1");
+  raw.prepare(
+    "INSERT INTO users (id, google_sub, name, email, created_at) VALUES (1, 'sub-leo', 'Leopold', null, ?)",
+  ).run(T0);
+  const insert = raw.prepare(`
+    INSERT INTO history_entries (user_id, video_id, title, played_at, room_item_key)
+    VALUES (1, 'dQw4w9WgXcQ', 'Get Lucky', ?, ?)
+  `);
+  // Un horodatage distinct par ligne: la lecture ordonne du plus recent au plus ancien,
+  // donc l ordre d insertion se retrouve par un reverse, sans dependre des ids.
+  roomItemKeys.forEach((key, i) => insert.run(T0 + i, key));
+  raw.close();
+}
+
 describe("chemin de la base", () => {
   it("prend data/syncmusic.db par defaut", () => {
     expect(resolveDbPath(undefined, "/app/dist")).toMatch(/data\/syncmusic\.db$/);
@@ -45,7 +68,7 @@ describe("chemin de la base", () => {
 });
 
 describe("migrations", () => {
-  it("cree les cinq tables et pose la version", () => {
+  it("cree les cinq tables et pose la derniere version", () => {
     const path = tempDbPath();
     openDatabase(path).close();
 
@@ -55,8 +78,96 @@ describe("migrations", () => {
     expect(tables).toEqual(expect.arrayContaining([
       "users", "sessions", "history_entries", "playlists", "playlist_items",
     ]));
-    expect(Number(raw.prepare("PRAGMA user_version").get()?.["user_version"])).toBe(1);
+    expect(Number(raw.prepare("PRAGMA user_version").get()?.["user_version"])).toBe(MIGRATIONS.length);
     raw.close();
+  });
+
+  it("porte les cinq colonnes de la memoire des ecoutes sur une base neuve (U2)", () => {
+    const path = tempDbPath();
+    openDatabase(path).close();
+
+    const raw = new DatabaseSync(path);
+    const colonnes = raw.prepare("PRAGMA table_info(history_entries)").all()
+      .map((row) => String(row["name"]));
+    raw.close();
+    expect(colonnes).toEqual(expect.arrayContaining([
+      "listened_ms", "channel_title", "thumbnail_url", "genres", "room_instance_id",
+    ]));
+  });
+
+  it("migre une base en version 1 sans perdre ses lignes", () => {
+    const path = tempDbPath();
+    baseVersion1(path, ["inst-1#i1"]);
+
+    const db = openDatabase(path);
+    const entries = db.listHistory(1, 10);
+    db.close();
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ videoId: "dQw4w9WgXcQ", title: "Get Lucky", playedAt: T0 });
+
+    const raw = new DatabaseSync(path);
+    expect(Number(raw.prepare("PRAGMA user_version").get()?.["user_version"])).toBe(2);
+    raw.close();
+  });
+
+  it("remplit l instance de room depuis le prefixe des cles deja stockees (KTD4)", () => {
+    const path = tempDbPath();
+    // Une cle bien formee, une sans separateur, une dont le prefixe serait vide.
+    baseVersion1(path, ["inst-1#i1", "sans-separateur", "#i1"]);
+
+    const db = openDatabase(path);
+    const instances = db.listHistory(1, 10).map((e) => e.roomInstanceId).reverse();
+    db.close();
+    expect(instances).toEqual(["inst-1", null, null]);
+  });
+
+  it("rend null les colonnes neuves des lignes migrees, sans planter a la lecture (R4)", () => {
+    const path = tempDbPath();
+    baseVersion1(path, ["inst-1#i1"]);
+
+    const db = openDatabase(path);
+    const entry = db.listHistory(1, 10)[0];
+    db.close();
+    expect(entry).toMatchObject({
+      listenedMs: null, channelTitle: null, thumbnailUrl: null, genres: null,
+    });
+  });
+
+  it("laisse la version et la table intactes quand une migration echoue", () => {
+    const path = tempDbPath();
+    baseVersion1(path, ["inst-1#i1"]);
+    // L index existe deja: la migration 2 echoue a sa derniere instruction, apres avoir
+    // ajoute ses colonnes. La transaction par script doit donc defaire des ALTER reussis.
+    const prepare = new DatabaseSync(path);
+    prepare.exec("CREATE INDEX history_by_session ON history_entries(user_id)");
+    prepare.close();
+
+    expect(() => openDatabase(path)).toThrow();
+
+    const raw = new DatabaseSync(path);
+    expect(Number(raw.prepare("PRAGMA user_version").get()?.["user_version"])).toBe(1);
+    expect(Number(raw.prepare("SELECT COUNT(*) AS n FROM history_entries").get()?.["n"])).toBe(1);
+    const colonnes = raw.prepare("PRAGMA table_info(history_entries)").all()
+      .map((row) => String(row["name"]));
+    raw.close();
+    expect(colonnes).not.toContain("room_instance_id");
+  });
+
+  it("sert le regroupement par seance et par compte par un index (KTD4)", () => {
+    const path = tempDbPath();
+    openDatabase(path).close();
+
+    const raw = new DatabaseSync(path);
+    const plan = raw.prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT room_instance_id, MIN(played_at) AS debut FROM history_entries
+      WHERE user_id = 1 GROUP BY room_instance_id
+    `).all().map((row) => String(row["detail"])).join(" | ");
+    raw.close();
+    // Sans index, le regroupement par seance passerait par un scan complet: c est
+    // exactement ce que KTD4 refuse en faisant de l instance une colonne.
+    expect(plan).toContain("history_by_session");
   });
 
   it("ne rejoue rien a la reouverture et garde les donnees", () => {
@@ -241,6 +352,82 @@ describe("historique", () => {
     const [long, sansTitre] = db.listHistory(user, 10);
     expect(sansTitre?.title).toBeNull();
     expect(long?.title).toHaveLength(LIMITS.titleChars);
+  });
+
+  it("inscrit l instance de room de la nouvelle ecoute (KTD4)", () => {
+    const db = fresh();
+    const user = withUser(db);
+    db.recordListen({ userId: user, ...ECOUTE }, T0);
+    db.recordListen({ userId: user, ...ECOUTE, roomItemKey: "sans-separateur" }, T0 + 1);
+    expect(db.listHistory(user, 10).map((e) => e.roomInstanceId)).toEqual([null, "inst-1"]);
+  });
+
+  it("garde le nom de chaine et la miniature quand oEmbed les a fournis (R2, R3)", () => {
+    const db = fresh();
+    const user = withUser(db);
+    db.recordListen({
+      userId: user,
+      ...ECOUTE,
+      channelTitle: "DaftPunkVEVO",
+      thumbnailUrl: "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+    }, T0);
+    expect(db.listHistory(user, 10)[0]).toMatchObject({
+      channelTitle: "DaftPunkVEVO",
+      thumbnailUrl: "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+    });
+  });
+
+  it("enregistre quand meme un morceau sans artiste, miniature ni duree (R4)", () => {
+    const db = fresh();
+    const user = withUser(db);
+    db.recordListen({ userId: user, ...ECOUTE }, T0);
+    expect(db.listHistory(user, 10)[0]).toMatchObject({
+      channelTitle: null, thumbnailUrl: null, genres: null, listenedMs: null,
+    });
+  });
+
+  it("tronque un nom de chaine trop long comme un titre", () => {
+    const db = fresh();
+    const user = withUser(db);
+    db.recordListen({ userId: user, ...ECOUTE, channelTitle: "x".repeat(500) }, T0);
+    expect(db.listHistory(user, 10)[0]?.channelTitle).toHaveLength(LIMITS.titleChars);
+  });
+
+  it("relit les genres en liste et distingue le tableau vide de la colonne absente (KTD12)", () => {
+    const path = tempDbPath();
+    const db = openDatabase(path);
+    const user = withUser(db);
+    ["a", "b", "c"].forEach((key, i) => db.recordListen({ userId: user, ...ECOUTE, roomItemKey: key }, T0 + i));
+    db.close();
+
+    // U6 n existe pas encore: on pose les genres a la main, comme il les ecrira.
+    const raw = new DatabaseSync(path);
+    const set = raw.prepare("UPDATE history_entries SET genres = ? WHERE room_item_key = ?");
+    set.run('["Hip hop music","Pop music"]', "a");
+    set.run("[]", "b");
+    raw.close();
+
+    const reopened = openDatabase(path);
+    const genres = reopened.listHistory(user, 10).map((e) => e.genres).reverse();
+    reopened.close();
+    expect(genres).toEqual([["Hip hop music", "Pop music"], [], null]);
+  });
+
+  it("lit une colonne de genres illisible comme jamais interrogee", () => {
+    const path = tempDbPath();
+    const db = openDatabase(path);
+    const user = withUser(db);
+    db.recordListen({ userId: user, ...ECOUTE }, T0);
+    db.close();
+
+    const raw = new DatabaseSync(path);
+    raw.prepare("UPDATE history_entries SET genres = ?").run("pas du json");
+    raw.close();
+
+    const reopened = openDatabase(path);
+    const genres = reopened.listHistory(user, 10)[0]?.genres;
+    reopened.close();
+    expect(genres).toBeNull();
   });
 });
 
