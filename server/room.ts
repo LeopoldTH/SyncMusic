@@ -312,6 +312,19 @@ export function createRoom(code: string, config: RoomConfig) {
     /** Une stagnation annoncee ouvre une barriere a la position courante (KD5). */
     stall(participantId: string, positionMs: number, nowMs: number): BarrierOutcome | Waiting {
       if (!presence.has(participantId)) return { kind: "ignored" };
+      /*
+       * Geler la position comme le fait `control("pause")` (U1, KTD11). Poser
+       * `playing = false` sans reancrer laissait `positionAt` retomber sur le dernier
+       * depart commun: mesure du 09/09/2026, position vraie 29 000 ms et `positionNow`
+       * qui rend 19 500 ms pendant toute la publicite. Une fin de morceau tombant la
+       * enregistrait une duree massivement fausse, sans rien signaler (R1).
+       *
+       * Meme famille que le defaut corrige en cce566b: la timeline et l etat de lecture
+       * changeaient separement. L ancre est la position rapportee par le client, pas
+       * celle qu extrapolerait le serveur, parce que c est elle qui a fige et c est elle
+       * qui part dans la barriere.
+       */
+      timeline = { positionMs, startAtServerMs: nowMs };
       playing = false;
       return barrier.open({ positionMs, atServerMs: nowMs });
     },

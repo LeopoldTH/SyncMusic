@@ -566,3 +566,103 @@ describe("etat de lecture apres un depart commun", () => {
     expect(room.state().playing).toBe(false);
   });
 });
+
+/*
+ * U1, R1, KTD11. Meme famille que le defaut corrige en cce566b: la timeline et l etat
+ * de lecture etaient changes separement. Ici `stall` posait `playing = false` sans
+ * reancrer, donc `positionAt` retombait sur le dernier depart commun tant que la
+ * stagnation durait.
+ *
+ * Mesure du 09/09/2026: apres une pause a 20 s puis une reprise, une stagnation
+ * annoncee a 29 000 ms faisait rendre 19 500 ms a `positionNow`, soit le point de
+ * depart de la reprise. Une fin de morceau tombant pendant une publicite enregistrait
+ * donc une duree massivement fausse, en silence (R1).
+ */
+describe("gel de la timeline pendant une stagnation (U1)", () => {
+  function enLecture() {
+    const room = createRoom("ABCD", CFG);
+    room.join("leo", T0);
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    room.control("play", T0);
+    const depart = room.resumeAt(0, T0);
+    room.ready("leo", depart.barrierId, T0);
+    return room; // depart commun a T0 + leadMs, position 0
+  }
+
+  it("garde la position atteinte quand la stagnation suit une pause et une reprise", () => {
+    const room = enLecture();
+    // Pause a 20 s d horloge, soit 19 500 ms joues: le depart commun avait 500 ms de marge.
+    room.control("pause", T0 + 20_000);
+    expect(room.positionNow(T0 + 20_000)).toBe(19_500);
+
+    room.control("play", T0 + 25_000);
+    const reprise = room.resumeAt(19_500, T0 + 25_000);
+    room.ready("leo", reprise.barrierId, T0 + 25_000);
+
+    // 9 500 ms de lecture reelle apres le depart commun de la reprise.
+    const auStall = T0 + 35_000;
+    expect(room.positionNow(auStall)).toBe(29_000);
+
+    room.stall("leo", 29_000, auStall);
+
+    // Sans reancrage, on relit le point de depart de la reprise: 19 500 ms.
+    expect(room.positionNow(auStall)).toBe(29_000);
+  });
+
+  it("garde la position atteinte quand la stagnation frappe sans pause prealable", () => {
+    const room = enLecture();
+    const auStall = T0 + 20_500;
+
+    room.stall("leo", 20_000, auStall);
+
+    // Sans reancrage, on relit le depart du morceau: 0.
+    expect(room.positionNow(auStall)).toBe(20_000);
+  });
+
+  /*
+   * Le cas qui donne son sens au correctif: pendant une publicite le client ne bouge
+   * plus, alors que le serveur, lui, continuerait d extrapoler. C est la position
+   * rapportee qui fait foi, celle-la meme qui part dans la barriere (KTD11).
+   */
+  it("prend la position rapportee par le client, pas celle extrapolee par le serveur", () => {
+    const room = enLecture();
+    const auStall = T0 + 40_500;
+    expect(room.positionNow(auStall)).toBe(40_000);
+
+    room.stall("leo", 29_000, auStall);
+
+    expect(room.positionNow(auStall)).toBe(29_000);
+  });
+
+  it("laisse la position figee pendant toute la stagnation", () => {
+    const room = enLecture();
+    room.stall("leo", 20_000, T0 + 20_500);
+
+    expect(room.positionNow(T0 + 20_500)).toBe(20_000);
+    expect(room.positionNow(T0 + 30_500)).toBe(20_000);
+  });
+
+  it("ignore une stagnation annoncee par quelqu un qui n est pas dans la room", () => {
+    const room = enLecture();
+
+    const out = room.stall("intrus", 5_000, T0 + 20_500);
+
+    expect(out.kind).toBe("ignored");
+    expect(room.state().playing).toBe(true);
+    expect(room.positionNow(T0 + 20_500)).toBe(20_000);
+  });
+
+  it("repart de la position rapportee quand la barriere se rouvre", () => {
+    const room = enLecture();
+    const attente = room.stall("leo", 29_000, T0 + 40_500);
+    if (attente.kind !== "waiting") return expect.unreachable("une attente etait attendue");
+    expect(attente.positionMs).toBe(29_000);
+
+    const depart = room.ready("leo", attente.barrierId, T0 + 41_000);
+
+    expect(depart.kind).toBe("start");
+    expect(room.state().playing).toBe(true);
+    // Depart commun a T0 + 41 500, puis 10 s de lecture.
+    expect(room.positionNow(T0 + 51_500)).toBe(39_000);
+  });
+});
