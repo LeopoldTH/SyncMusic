@@ -1,6 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { openDatabase, type Db } from "./db";
-import { fetchVideoTopics, fillMissingGenres, parseTopicsResponse } from "./videoTopics";
+import {
+  createGenreFiller, fetchVideoTopics, fillMissingGenres, parseTopicsResponse,
+} from "./videoTopics";
 import { mockFetch, restoreFetchAfterEach, jsonOk as ok, httpStatus as status } from "./mockFetch";
 
 restoreFetchAfterEach();
@@ -349,6 +351,124 @@ describe("remplissage des genres par lots (U6)", () => {
     const calls = captureFetch(() => ok({ items: [] }));
     await fillMissingGenres({ db, apiKey: CLEF });
     expect(calls).toHaveLength(0);
+    db.close();
+  });
+
+  /*
+   * Revue du 11/09/2026, #4. La route de statistiques lance ce remplissage sans
+   * l attendre: un rejet n y serait rattrape par personne, et Node arrete alors le
+   * process, toutes les rooms avec. Une base verrouillee (SQLITE_BUSY) ou un disque
+   * plein doivent finir en une ligne de log, jamais en rejet.
+   */
+  it("se resout sans rejeter quand la lecture des videos a interroger leve (revue #4)", async () => {
+    const { db } = dbWithVideos(1);
+    vi.spyOn(db, "listVideoIdsWithoutGenres").mockImplementation(() => {
+      throw new Error("database is locked");
+    });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const calls = captureFetch(() => ok({ items: [] }));
+
+    await expect(fillMissingGenres({ db, apiKey: CLEF })).resolves.toBeUndefined();
+    expect(calls).toHaveLength(0);
+    // Une ligne, jamais l objet d erreur: son contexte peut porter un secret.
+    expect(logged).toHaveBeenCalledTimes(1);
+    expect(logged).toHaveBeenCalledWith(expect.any(String));
+    db.close();
+  });
+
+  it("se resout sans rejeter quand l ecriture des genres leve (revue #4)", async () => {
+    const { db } = dbWithVideos(2);
+    vi.spyOn(db, "setVideoGenres").mockImplementation(() => {
+      throw new Error("database or disk is full");
+    });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const calls = captureFetch((ids) => ok({ items: ids.map((id) => item(id, `${WIKI}Pop_music`)) }));
+
+    await expect(fillMissingGenres({ db, apiKey: CLEF })).resolves.toBeUndefined();
+    expect(calls).toHaveLength(1);
+    expect(logged).toHaveBeenCalledTimes(1);
+    expect(logged).toHaveBeenCalledWith(expect.any(String));
+    db.close();
+  });
+});
+
+/*
+ * Revue du 11/09/2026, #8. Le remplissage part de la route de statistiques, que tout
+ * compte Google peut recharger en boucle, et une video que YouTube ne rend plus reste a
+ * NULL: chaque passage la redemande. La borne de lots par passage ne suffit donc pas,
+ * le declencheur borne aussi la cadence des passages.
+ */
+describe("cadence du remplissage des genres (revue #8)", () => {
+  const TEN_MINUTES = 10 * 60_000;
+
+  it("ne lance qu un passage pour cent declenchements rapproches", async () => {
+    // YouTube ne rend jamais cette video: sans borne, chaque declenchement la redemande.
+    const { db } = dbWithVideos(1);
+    const calls = captureFetch(() => ok({ items: [] }));
+    let clock = T0;
+    const filler = createGenreFiller({ db, apiKey: CLEF, minIntervalMs: TEN_MINUTES, now: () => clock });
+
+    for (let i = 0; i < 100; i += 1) {
+      await filler.trigger();
+      clock += 1_000;
+    }
+    expect(calls).toHaveLength(1);
+    db.close();
+  });
+
+  it("ignore un declenchement pendant qu un passage est en cours", async () => {
+    const { db } = dbWithVideos(1);
+    let release: () => void = () => {};
+    const calls = captureFetch((_ids, call) => (
+      call === 0
+        ? new Promise<Response>((resolve) => { release = () => resolve(ok({ items: [] })); })
+        : ok({ items: [] })
+    ));
+    // Intervalle nul: seul le passage en cours peut refuser un declenchement ici.
+    const filler = createGenreFiller({ db, apiKey: CLEF, minIntervalMs: 0, now: () => T0 });
+
+    const first = filler.trigger();
+    await filler.trigger();
+    expect(calls).toHaveLength(1);
+
+    release();
+    await first;
+    await filler.trigger();
+    expect(calls).toHaveLength(2);
+    db.close();
+  });
+
+  it("relance un passage une fois l intervalle ecoule", async () => {
+    const { db } = dbWithVideos(1);
+    const calls = captureFetch(() => ok({ items: [] }));
+    let clock = T0;
+    const filler = createGenreFiller({ db, apiKey: CLEF, minIntervalMs: TEN_MINUTES, now: () => clock });
+
+    await filler.trigger();
+    clock += TEN_MINUTES - 1;
+    await filler.trigger();
+    expect(calls).toHaveLength(1);
+
+    clock += 1;
+    await filler.trigger();
+    expect(calls).toHaveLength(2);
+    db.close();
+  });
+
+  it("libere le passage en cours meme quand il echoue", async () => {
+    const { db } = dbWithVideos(1);
+    vi.spyOn(db, "listVideoIdsWithoutGenres").mockImplementationOnce(() => {
+      throw new Error("database is locked");
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const calls = captureFetch(() => ok({ items: [] }));
+    const filler = createGenreFiller({ db, apiKey: CLEF, minIntervalMs: 0, now: () => T0 });
+
+    await filler.trigger();
+    expect(calls).toHaveLength(0);
+    // Reste marque en cours, le remplissage serait eteint jusqu au redemarrage du serveur.
+    await filler.trigger();
+    expect(calls).toHaveLength(1);
     db.close();
   });
 });

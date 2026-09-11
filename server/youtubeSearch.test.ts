@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { parseSearchResponse } from "./youtubeSearch";
+import { parseSearchResponse, searchVideos } from "./youtubeSearch";
+import { mockFetch, restoreFetchAfterEach, httpStatus as status } from "./mockFetch";
+
+restoreFetchAfterEach();
+
+const CLEF = "clef-de-test";
 
 /** Forme reelle de la reponse, relevee sur l API le 29/08/2026. */
 function item(videoId: string, title: string, channelTitle = "Une chaine") {
@@ -52,5 +57,30 @@ describe("lecture d une reponse de recherche", () => {
   it("borne un titre demesure", () => {
     const results = parseSearchResponse({ items: [item("kJQP7kiw5Fk", "x".repeat(500))] });
     expect(results[0]?.title.length).toBe(120);
+  });
+});
+
+/*
+ * Revue du 11/09/2026, #2. Le classement d un echec de l API vit dans youtubeApiError.ts,
+ * partage avec les genres: ce test garde la recherche branchee dessus, un quota epuise
+ * doit rester distinct d une panne.
+ */
+describe("appel de la recherche a l API", () => {
+  it("distingue un quota epuise d une panne", async () => {
+    mockFetch(() => Promise.resolve(new Response(
+      JSON.stringify({ error: { errors: [{ reason: "quotaExceeded" }] } }),
+      { status: 403 },
+    )));
+    await expect(searchVideos("despacito", CLEF)).resolves.toEqual({ ok: false, reason: "quota" });
+
+    // Un 403 pour une cle mal restreinte n est pas un quota: il ne repart pas demain.
+    mockFetch(() => Promise.resolve(new Response(
+      JSON.stringify({ error: { errors: [{ reason: "forbidden" }] } }),
+      { status: 403 },
+    )));
+    await expect(searchVideos("despacito", CLEF)).resolves.toEqual({ ok: false, reason: "unavailable" });
+
+    mockFetch(status(500));
+    await expect(searchVideos("despacito", CLEF)).resolves.toEqual({ ok: false, reason: "unavailable" });
   });
 });

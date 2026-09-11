@@ -21,7 +21,7 @@ import {
   LIMITS, openDatabase, resolveDbPath,
   type HistoryCursor, type SessionCursor, type User,
 } from "./db";
-import { fillMissingGenres } from "./videoTopics";
+import { createGenreFiller } from "./videoTopics";
 import { createAuth, readAuthConfig, readBody, sameOrigin, sendJson } from "./auth";
 import { recordCommonStart, recordPlayedSegment } from "./history";
 import type { PlayedSegment } from "./room";
@@ -224,6 +224,16 @@ const searchBudget = createSearchBudget({
   perClientMax: 40,
   perClientDaily: 20,
 });
+
+/*
+ * Remplissage des genres, un seul declencheur pour tout le process (revue du
+ * 11/09/2026, #8): c est lui qui retient qu un passage tourne deja ou vient de partir,
+ * et ce souvenir doit etre partage par toutes les requetes. Sans cle, rien a remplir,
+ * comme pour la recherche (R3).
+ */
+const genreFiller = YOUTUBE_API_KEY === null
+  ? null
+  : createGenreFiller({ db, apiKey: YOUTUBE_API_KEY });
 
 /*
  * Adresse du demandeur, telle que Fly la rapporte. Derriere le proxy, l en-tete est
@@ -439,12 +449,16 @@ async function handleApi(request: IncomingMessage, response: ServerResponse): Pr
      * pas, ce qui manque a ce passage revient au suivant. Sans cle, rien ne part et
      * l application marche pareil, comme pour la recherche (R3).
      *
+     * Le declencheur ne fait rien si un passage tourne deja ou a demarre il y a moins
+     * de dix minutes (revue du 11/09/2026, #8): recharger cette route en boucle ne vide
+     * plus le quota YouTube de toute l application.
+     *
      * Premiere page seulement. Chaque « Voir plus » repasse par cette route, et relancer
      * le remplissage a chaque clic redemanderait a YouTube les memes videos encore sans
      * genre, en doublon, quota compris. Un passage par visite de l ecran suffit.
      */
-    if (YOUTUBE_API_KEY !== null && url.searchParams.get("before") === null) {
-      void fillMissingGenres({ db, apiKey: YOUTUBE_API_KEY });
+    if (genreFiller !== null && url.searchParams.get("before") === null) {
+      void genreFiller.trigger();
     }
     return true;
   }

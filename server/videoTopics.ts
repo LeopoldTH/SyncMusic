@@ -10,8 +10,8 @@
  * Mesure du 09/09/2026: un lot de cinquante identifiants coute 1 unite de quota, la ou
  * une recherche en coute 100, sur un budget quotidien de 10 000. Le garde de budget de
  * la recherche ne voit pas cet appel et ne doit pas le voir: il facturerait cent unites
- * pour un lot qui en coute une. La seule protection du quota ici est la borne du
- * nombre de lots par declenchement.
+ * pour un lot qui en coute une. Le quota est protege ici par deux bornes: le nombre de
+ * lots par passage, et le delai minimal entre deux passages (revue du 11/09/2026, #8).
  *
  * La cle ne quitte jamais le serveur, comme pour la recherche: une cle d API dans du
  * JavaScript de navigateur est publique par construction, et celle-ci est facturable.
@@ -19,6 +19,7 @@
 
 import { z } from "zod";
 import type { Db } from "./db";
+import { classifyYoutubeApiError } from "./youtubeApiError";
 
 /** Genres d une video, deja normalises. Un tableau vide = interrogee, aucun genre. */
 export interface VideoTopics {
@@ -39,10 +40,11 @@ const ENDPOINT = "https://www.googleapis.com/youtube/v3/videos";
 export const BATCH_SIZE = 50;
 
 /*
- * Lots par declenchement. Deux cents videos par ouverture d ecran, quatre unites de
- * quota: assez pour qu un historique ordinaire soit couvert en un passage, assez peu
- * pour qu un rafraichissement en boucle ne coute rien de sensible sur les 10 000
- * unites du jour. Ce qui deborde attend le passage suivant.
+ * Lots par passage. Deux cents videos, quatre unites de quota: assez pour qu un
+ * historique ordinaire soit couvert en un passage, assez peu pour qu un passage ne coute
+ * rien de sensible sur les 10 000 unites du jour. Ce qui deborde attend le passage
+ * suivant. Cette borne ne dit rien de la cadence des passages: c est le role de
+ * MIN_FILL_INTERVAL_MS.
  */
 const MAX_BATCHES_PER_RUN = 4;
 
@@ -158,18 +160,7 @@ export async function fetchVideoTopics(
   const timer = setTimeout(() => abort.abort(), options.timeoutMs ?? 5_000);
   try {
     const response = await fetch(url, { signal: abort.signal });
-    if (response.status === 403) {
-      /*
-       * 403 couvre aussi bien le quota epuise qu une cle mal restreinte, comme pour la
-       * recherche. Seul le premier cas se resorbe tout seul: on lit le motif plutot
-       * que de deviner.
-       */
-      const body: unknown = await response.json().catch(() => null);
-      const reason = (body as { error?: { errors?: Array<{ reason?: string }> } })
-        ?.error?.errors?.[0]?.reason;
-      return { ok: false, reason: reason === "quotaExceeded" ? "quota" : "unavailable" };
-    }
-    if (!response.ok) return { ok: false, reason: "unavailable" };
+    if (!response.ok) return { ok: false, reason: await classifyYoutubeApiError(response) };
     return { ok: true, topics: parseTopicsResponse(await response.json()) };
   } catch {
     return { ok: false, reason: "unavailable" };
@@ -181,40 +172,112 @@ export async function fetchVideoTopics(
 export interface FillGenresOptions {
   db: Db;
   apiKey: string;
-  /** Lots d au plus cinquante videos par declenchement. Defaut: MAX_BATCHES_PER_RUN. */
+  /** Lots d au plus cinquante videos par passage. Defaut: MAX_BATCHES_PER_RUN. */
   maxBatches?: number;
 }
 
 /*
- * Point d entree du remplissage (U6, R11). Appelable sans etre attendu: la promesse ne
- * porte aucune donnee et ne rejette pas, U7 la declenche apres avoir compose sa reponse
- * et n a rien a en tirer. Ce qui manque a ce passage revient au suivant, sans etat a
- * garder: la colonne a NULL est la file d attente (KTD12).
+ * Un passage de remplissage (U6, R11). Appelable sans etre attendu: la promesse ne
+ * porte aucune donnee et ne rejette jamais. U7 le declenche, via createGenreFiller,
+ * apres avoir compose sa reponse, et n en a rien a tirer. Ce qui manque a ce passage
+ * revient au suivant, sans etat a garder: la colonne a NULL est la file d attente
+ * (KTD12).
  *
  * Une video que YouTube ne rend pas reste a NULL et sera redemandee: c est ce que veut
  * une reponse partielle, et le prix a payer est au pire une unite par passage pour une
  * video devenue introuvable.
  */
 export async function fillMissingGenres(options: FillGenresOptions): Promise<void> {
-  const maxBatches = Math.max(0, Math.trunc(options.maxBatches ?? MAX_BATCHES_PER_RUN));
-  const videoIds = options.db.listVideoIdsWithoutGenres(maxBatches * BATCH_SIZE);
+  try {
+    const maxBatches = Math.max(0, Math.trunc(options.maxBatches ?? MAX_BATCHES_PER_RUN));
+    const videoIds = options.db.listVideoIdsWithoutGenres(maxBatches * BATCH_SIZE);
 
-  for (let start = 0; start < videoIds.length; start += BATCH_SIZE) {
-    const outcome = await fetchVideoTopics(
-      videoIds.slice(start, start + BATCH_SIZE),
-      options.apiKey,
-    );
-    if (!outcome.ok) {
-      /*
-       * Quota epuise: les lots suivants seront refuses pareil, et chaque tentative
-       * reste facturee. Une panne, elle, peut ne concerner que cette requete: on tente
-       * le lot suivant, et celui-ci se retentera au passage suivant.
-       */
-      if (outcome.reason === "quota") return;
-      continue;
+    for (let start = 0; start < videoIds.length; start += BATCH_SIZE) {
+      const outcome = await fetchVideoTopics(
+        videoIds.slice(start, start + BATCH_SIZE),
+        options.apiKey,
+      );
+      if (!outcome.ok) {
+        /*
+         * Quota epuise: les lots suivants seront refuses pareil, et chaque tentative
+         * reste facturee. Une panne, elle, peut ne concerner que cette requete: on tente
+         * le lot suivant, et celui-ci se retentera au passage suivant.
+         */
+        if (outcome.reason === "quota") return;
+        continue;
+      }
+      for (const topic of outcome.topics) {
+        options.db.setVideoGenres(topic.videoId, topic.genres);
+      }
     }
-    for (const topic of outcome.topics) {
-      options.db.setVideoGenres(topic.videoId, topic.genres);
-    }
+  } catch {
+    /*
+     * Revue du 11/09/2026, #4. « Ne rejette jamais » n etait qu affirme: une base
+     * verrouillee (SQLITE_BUSY) ou un disque plein font lever la lecture ou l ecriture,
+     * et personne n attend cette promesse. Node arrete alors le process sur le rejet
+     * non rattrape, toutes les rooms avec. Ce qui est reste a NULL revient au passage
+     * suivant.
+     *
+     * Une ligne fixe, jamais l objet d erreur, comme pour les requetes dans index.ts:
+     * son contexte peut porter un secret.
+     */
+    console.error("erreur pendant le remplissage des genres");
   }
+}
+
+/*
+ * Delai minimal entre deux demarrages de passage (revue du 11/09/2026, #8). La borne de
+ * lots se compte par passage, pas dans le temps: sans ce delai, recharger la route de
+ * statistiques en boucle payait jusqu a quatre unites par requete, et une video que
+ * YouTube ne rend plus, restee a NULL, rendait ce cout perpetuel.
+ *
+ * Hypothese assumee: une soiree tout juste enregistree peut attendre quelques minutes
+ * ses genres. En echange, le pire cas ne depend plus du nombre de requetes: 144 passages
+ * par jour a quatre unites, 576 unites sur les 10 000.
+ */
+const MIN_FILL_INTERVAL_MS = 10 * 60_000;
+
+export interface GenreFillerOptions extends FillGenresOptions {
+  /** Delai minimal entre deux demarrages de passage. Defaut: MIN_FILL_INTERVAL_MS. */
+  minIntervalMs?: number;
+  /**
+   * Horloge en millisecondes, injectee par les tests. Defaut: monotone, pour qu un
+   * reglage de l heure du systeme ne bloque ni ne relance le remplissage.
+   */
+  now?: () => number;
+}
+
+/*
+ * Le declencheur du remplissage, un par process (revue du 11/09/2026, #8). Il garde le
+ * seul etat que la base ne porte pas: un passage tourne-t-il deja, et quand le dernier
+ * a-t-il demarre. Il borne quand un passage part, jamais ce qu il fait: les genres se
+ * remplissent toujours par lots et apres coup, jamais a l ajout d un morceau (KTD5).
+ */
+export function createGenreFiller(options: GenreFillerOptions) {
+  const minIntervalMs = options.minIntervalMs ?? MIN_FILL_INTERVAL_MS;
+  const now = options.now ?? (() => performance.now());
+  let running = false;
+  let lastStartedAtMs: number | null = null;
+
+  return {
+    /*
+     * Lance un passage, ou ne fait rien si un passage tourne deja ou a demarre il y a
+     * moins de `minIntervalMs`. La promesse se resout a la fin du passage lance, ou tout
+     * de suite quand rien ne part, et ne rejette jamais.
+     */
+    async trigger(): Promise<void> {
+      if (running) return;
+      const startedAtMs = now();
+      if (lastStartedAtMs !== null && startedAtMs - lastStartedAtMs < minIntervalMs) return;
+
+      running = true;
+      lastStartedAtMs = startedAtMs;
+      try {
+        await fillMissingGenres(options);
+      } finally {
+        // Un passage qui echoue ne doit pas eteindre le remplissage jusqu au redemarrage.
+        running = false;
+      }
+    },
+  };
 }
