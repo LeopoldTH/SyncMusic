@@ -122,4 +122,34 @@ describe("page de seances suivante", () => {
     seconde.totals.trackCount = 99;
     expect(ajouterPage(premiere, seconde).totals.trackCount).toBe(2);
   });
+
+  // Deux clics sur "Voir plus" avant que la reponse arrive rejouent la meme page:
+  // sans dedoublonnage, les seances de la page se retrouvent deux fois (revue du
+  // 11/09/2026, #5).
+  it("la meme page appliquee deux fois ne duplique aucune seance", () => {
+    const precedent = page(["a", "b"], "curseur");
+    const suivant = page(["c", "d"], "curseur2");
+    const uneFois = ajouterPage(precedent, suivant);
+    const deuxFois = ajouterPage(uneFois, suivant);
+    expect(deuxFois.sessions.entries.map((s) => s.roomInstanceId)).toEqual(["a", "b", "c", "d"]);
+  });
+
+  // Une reponse en retard (l ecran a recharge ses stats entre-temps) peut chevaucher
+  // la page deja affichee: chaque seance ne doit rester qu une fois, dans l ordre
+  // (revue du 11/09/2026, #5).
+  it("une page qui chevauche la precedente ne garde chaque seance qu une fois, dans l ordre", () => {
+    const precedent = page(["a", "b", "c"], "curseur");
+    const suivant = page(["c", "d"], null);
+    const fusion = ajouterPage(precedent, suivant);
+    expect(fusion.sessions.entries.map((s) => s.roomInstanceId)).toEqual(["a", "b", "c", "d"]);
+    expect(fusion.sessions.nextBefore).toBeNull();
+  });
+
+  it("une page sans recouvrement s ajoute telle quelle", () => {
+    const precedent = page(["a"], "curseur");
+    const suivant = page(["b", "c"], "curseur2");
+    const fusion = ajouterPage(precedent, suivant);
+    expect(fusion.sessions.entries.map((s) => s.roomInstanceId)).toEqual(["a", "b", "c"]);
+    expect(fusion.sessions.nextBefore).toBe("curseur2");
+  });
 });
