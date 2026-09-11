@@ -12,6 +12,7 @@
  */
 
 import { z } from "zod";
+import { classifyYoutubeApiError } from "./youtubeApiError";
 
 export interface SearchResult {
   videoId: string;
@@ -109,18 +110,8 @@ export async function searchVideos(
   const timer = setTimeout(() => abort.abort(), options.timeoutMs ?? 5_000);
   try {
     const response = await fetch(url, { signal: abort.signal });
-    if (response.status === 403) {
-      /*
-       * 403 couvre aussi bien le quota epuise qu une cle mal restreinte. Seul le
-       * premier cas se resorbe tout seul, et c est le seul qu on sache expliquer a
-       * l utilisateur: on lit le motif plutot que de deviner.
-       */
-      const body: unknown = await response.json().catch(() => null);
-      const reason = (body as { error?: { errors?: Array<{ reason?: string }> } })
-        ?.error?.errors?.[0]?.reason;
-      return { ok: false, reason: reason === "quotaExceeded" ? "quota" : "unavailable" };
-    }
-    if (!response.ok) return { ok: false, reason: "unavailable" };
+    // Un quota epuise est le seul echec qu on sache expliquer a l utilisateur.
+    if (!response.ok) return { ok: false, reason: await classifyYoutubeApiError(response) };
     return { ok: true, results: parseSearchResponse(await response.json()) };
   } catch {
     return { ok: false, reason: "unavailable" };
