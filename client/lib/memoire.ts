@@ -240,10 +240,16 @@ export async function fetchStats(before?: string): Promise<Stats | null> {
  * « Voir plus ».
  */
 export function ajouterPage(precedent: Stats, suivant: Stats): Stats {
+  // Idempotent: un deuxieme clic sur "Voir plus" avant la reponse, ou une reponse en
+  // retard apres un rechargement de l ecran, rejoue une page deja fusionnee. Sans ce
+  // filtre les seances de `suivant` se dupliquent (meme roomInstanceId deux fois) au
+  // lieu de rester une fusion pure (revue du 11/09/2026, #5).
+  const dejaVues = new Set(precedent.sessions.entries.map((s) => s.roomInstanceId));
+  const nouvelles = suivant.sessions.entries.filter((s) => !dejaVues.has(s.roomInstanceId));
   return {
     ...precedent,
     sessions: {
-      entries: [...precedent.sessions.entries, ...suivant.sessions.entries],
+      entries: [...precedent.sessions.entries, ...nouvelles],
       nextBefore: suivant.sessions.nextBefore,
     },
   };
