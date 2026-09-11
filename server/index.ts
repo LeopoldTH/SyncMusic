@@ -438,8 +438,14 @@ async function handleApi(request: IncomingMessage, response: ServerResponse): Pr
      * une valeur. Sans `await` et sans `catch`: la promesse ne porte rien et ne rejette
      * pas, ce qui manque a ce passage revient au suivant. Sans cle, rien ne part et
      * l application marche pareil, comme pour la recherche (R3).
+     *
+     * Premiere page seulement. Chaque « Voir plus » repasse par cette route, et relancer
+     * le remplissage a chaque clic redemanderait a YouTube les memes videos encore sans
+     * genre, en doublon, quota compris. Un passage par visite de l ecran suffit.
      */
-    if (YOUTUBE_API_KEY !== null) void fillMissingGenres({ db, apiKey: YOUTUBE_API_KEY });
+    if (YOUTUBE_API_KEY !== null && url.searchParams.get("before") === null) {
+      void fillMissingGenres({ db, apiKey: YOUTUBE_API_KEY });
+    }
     return true;
   }
 
