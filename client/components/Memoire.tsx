@@ -28,8 +28,13 @@ const SEUIL_TOP = 5;
 /** Espace fine insecable avant les deux-points (charte Console). */
 const FINE = "\u202f";
 
+/* Le mot accorde seul, pour les grands chiffres qui s affichent a part de leur libelle. */
+function accord(n: number, singulier: string, pluriel = `${singulier}s`): string {
+  return n > 1 ? pluriel : singulier;
+}
+
 function compte(n: number, singulier: string, pluriel = `${singulier}s`): string {
-  return `${n} ${n > 1 ? pluriel : singulier}`;
+  return `${n} ${accord(n, singulier, pluriel)}`;
 }
 
 /*
@@ -81,12 +86,12 @@ function Compteurs({ totals }: { totals: Totals }) {
         )}
         <div className="memoire__compteur">
           <span className="memoire__valeur">{totals.trackCount}</span>
-          <span className="memoire__legende">{totals.trackCount > 1 ? "Morceaux" : "Morceau"}</span>
+          <span className="memoire__legende">{accord(totals.trackCount, "Morceau", "Morceaux")}</span>
         </div>
         {totals.sessionCount === 0 ? null : (
           <div className="memoire__compteur">
             <span className="memoire__valeur">{totals.sessionCount}</span>
-            <span className="memoire__legende">{totals.sessionCount > 1 ? "Séances" : "Séance"}</span>
+            <span className="memoire__legende">{accord(totals.sessionCount, "Séance")}</span>
           </div>
         )}
       </div>

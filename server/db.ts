@@ -298,7 +298,7 @@ function parseGenres(raw: unknown): string[] | null {
 
 /*
  * `LIMIT` recoit une valeur de la route, pas de la base: on la ramene a un entier
- * positif plutot que de la lier telle quelle. Meme geste que `listVideoIdsWithoutGenres`.
+ * positif plutot que de la lier telle quelle.
  */
 function boundLimit(limit: number): number {
   return Math.max(0, Math.trunc(limit));
@@ -776,7 +776,7 @@ export function openDatabase(path: string) {
      */
     listVideoIdsWithoutGenres(limit: number): string[] {
       return statements.videoIdsWithoutGenres
-        .all(Math.max(0, Math.trunc(limit)))
+        .all(boundLimit(limit))
         .map((row) => String(row["video_id"]));
     },
 

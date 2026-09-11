@@ -8,11 +8,12 @@
  * partage avec lui que `shared/`, et une reponse venue du reseau se valide de toute
  * facon champ par champ.
  *
- * Deux champs de la reponse ne sont volontairement pas repris: `thumbnailUrl` et les
- * `genres` d une ligne de seance. L ecran n affiche pas de miniature — leur traitement
- * visuel n est pas tranche par la charte (U8) — et les genres n existent a l ecran que
- * comme classement (R12). Ne pas les porter jusqu ici est la garantie la moins chere
- * qu ils ne seront pas affiches par megarde.
+ * Trois champs de la reponse ne sont volontairement pas repris: `thumbnailUrl` nulle
+ * part, `channelTitle` sur le top morceaux, et les `genres` d une ligne de seance.
+ * L ecran n affiche pas de miniature (leur traitement visuel n est pas tranche par la
+ * charte, U8), le top morceaux ne montre pas l artiste de chaque titre, et les genres
+ * n existent a l ecran que comme classement (R12). Ne pas les porter jusqu ici est la
+ * garantie la moins chere qu ils ne seront pas affiches par megarde.
  */
 
 /** Compteurs cumules (R6). */
