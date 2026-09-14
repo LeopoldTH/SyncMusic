@@ -18,10 +18,14 @@ interface Props {
 }
 
 /*
- * Un classement ne s appelle « top » qu a partir de cinq entrees distinctes
- * (Assumption U8, R9). Le compte porte sur les entrees, jamais sur les lignes: vingt
- * ecoutes de deux morceaux passeraient un seuil exprime en lignes et produiraient un
- * « top » a deux entrees, ce que R9 interdit en esprit.
+ * Un classement ne s appelle « top » qu a partir de cinq entrees distinctes ET de cinq
+ * morceaux couverts (Assumption U8, R9). Un morceau, une voix (revue du 11/09/2026, #6):
+ * pour les genres, `distinctCount` compte des labels et un seul morceau en porte
+ * plusieurs (Despacito: Pop music, Music of Latin America, Electronic music), donc
+ * trois morceaux suffiraient a passer un seuil exprime en labels. `coveredPlays` compte
+ * les morceaux et non les labels, ce qui redonne un morceau = une voix. Pour morceaux
+ * et artistes ca ne change rien: une entree distincte porte toujours au moins une
+ * ecoute, donc coveredPlays >= distinctCount y est deja vrai.
  */
 const SEUIL_TOP = 5;
 
@@ -131,7 +135,11 @@ function Classement<Entry>({ titreTop, titreListe, classement, totalPlays, note,
   return (
     <section className="panel">
       <div className="panel__head">
-        <h2>{classement.distinctCount >= SEUIL_TOP ? titreTop : titreListe}</h2>
+        <h2>
+          {classement.distinctCount >= SEUIL_TOP && classement.coveredPlays >= SEUIL_TOP
+            ? titreTop
+            : titreListe}
+        </h2>
       </div>
       <ol className="memoire__liste">
         {classement.entries.map((entry, index) => ligne(entry, index + 1))}

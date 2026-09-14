@@ -244,6 +244,39 @@ describe("classements de la memoire", () => {
     expect(html).toContain("Un morceau peut compter dans plusieurs genres");
     expect(html).toContain("Electronic music");
   });
+
+  // Couvre AE4 pour les genres (revue du 11/09/2026, #6): trois morceaux, meme
+  // portant six labels distincts, ne sont pas un top.
+  it("n annonce pas de top genres sous le seuil de morceaux, meme avec six labels distincts", () => {
+    const genresEparpilles = stats({
+      totals: { listenedMs: 300_000, timedTrackCount: 3, trackCount: 3, sessionCount: 1 },
+      topGenres: {
+        entries: [
+          { genre: "Pop music", trackCount: 1 },
+          { genre: "Music of Latin America", trackCount: 1 },
+          { genre: "Electronic music", trackCount: 1 },
+          { genre: "Dance music", trackCount: 1 },
+          { genre: "Hip hop music", trackCount: 1 },
+          { genre: "Rock music", trackCount: 1 },
+        ],
+        coveredPlays: 3, distinctCount: 6,
+      },
+    });
+    const html = rendu({ stats: genresEparpilles });
+    expect(html).not.toMatch(/\btop\b/i);
+    expect(html).toContain("Genres écoutés");
+  });
+
+  it("appelle top un classement de genres a cinq morceaux et cinq labels distincts", () => {
+    const genresLarges = stats({
+      totals: { listenedMs: 500_000, timedTrackCount: 5, trackCount: 5, sessionCount: 1 },
+      topGenres: {
+        entries: [1, 2, 3, 4, 5].map((n) => ({ genre: `Genre ${n}`, trackCount: 1 })),
+        coveredPlays: 5, distinctCount: 5,
+      },
+    });
+    expect(rendu({ stats: genresLarges })).toContain("Top genres");
+  });
 });
 
 describe("fiches de seance", () => {

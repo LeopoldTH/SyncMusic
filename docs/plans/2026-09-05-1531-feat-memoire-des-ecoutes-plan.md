@@ -254,7 +254,7 @@ flowchart TB
 
 ### Assumptions
 
-- Le seuil au-delà duquel un classement s'appelle un « top » est fixé à cinq entrées distinctes, compté sur les entrées classées et non sur les lignes. Sans ce compte, vingt écoutes de deux morceaux passeraient un seuil exprimé en lignes et produiraient un « top » à deux entrées, ce que R9 interdit en esprit.
+- Le seuil au-delà duquel un classement s'appelle un « top » est fixé à cinq entrées distinctes **et** cinq écoutes derrière elles. Le compte d'entrées empêche vingt écoutes de deux morceaux de produire un « top » à deux entrées ; le compte d'écoutes empêche l'inverse, trois morceaux produisant six étiquettes de genre, un morceau portant plusieurs genres et pesant alors plusieurs fois. Un morceau, une voix : le classement des genres compte des morceaux, jamais des étiquettes. *(session-settled: user-directed — chosen over élire un seul genre par morceau : YouTube rend un sac d'étiquettes sans ordre, et l'élection se tromperait, par exemple « Electronic music » pour Despacito.)*
 - Le nombre de morceaux compte les lignes jouées, pas les vidéos distinctes : la même vidéo ajoutée deux fois dans une file donne deux lignes, et c'est bien deux écoutes.
 - Une séance porte la date et l'heure de son premier morceau. L'heure sépare deux séances du même jour, atteignable dès aujourd'hui, et rend lisible une séance à cheval sur minuit.
 - Quand plusieurs lignes portent la même vidéo, le titre et la miniature retenus sont les plus récents non nuls.
