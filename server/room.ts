@@ -80,11 +80,37 @@ export function createRoom(code: string, config: RoomConfig) {
    * la marque de deconnexion la plus recente est celle du mauvais participant.
    */
   let lastDepartureAtMs: number | null = null;
+  /*
+   * Une barriere est ouverte et le depart commun n a pas encore eu lieu (revue du
+   * 11/09/2026, #9). Distinct de `playing`, et il le faut: pendant l attente les deux
+   * clients sont en pause a la position annoncee (client/sync/session.ts, case
+   * "waiting"), mais `room_state` doit continuer d annoncer la lecture et
+   * `peerPositions` de ramener les rapports a un instant commun, sans quoi on rejoue le
+   * defaut du 04/09/2026.
+   */
+  let awaitingStart = false;
 
   function positionAt(nowMs: number): number {
     if (timeline === null) return 0;
-    if (!playing) return timeline.positionMs;
+    // Rien ne s entend pendant une attente: la duree ecrite l exclut (R1).
+    if (!playing || awaitingStart) return timeline.positionMs;
     return timeline.positionMs + Math.max(0, nowMs - timeline.startAtServerMs);
+  }
+
+  /*
+   * Le seul ouvreur de barriere (revue du 11/09/2026, #9). Les trois chemins d ouverture
+   * (reprise, stagnation, arrivee en cours) suspendent l ecoute de la meme facon, donc
+   * la timeline se gele sur la position annoncee et l attente se marque ici, une fois.
+   *
+   * Les separer coutait jusqu a 45 s d attente comptees comme du temps ecoute, `tick`
+   * prolongeant l echeance tant que personne n est pret (R17): mesure du 11/09/2026,
+   * 30 000 ms joues puis 30 s d attente rendaient 60 000 ms sur `control("next")`.
+   * Seule la stagnation gelait, parce qu elle seule avait ete prise en flagrant delit.
+   */
+  function openBarrier(positionMs: number, nowMs: number): Waiting {
+    timeline = { positionMs, startAtServerMs: nowMs };
+    awaitingStart = true;
+    return barrier.open({ positionMs, atServerMs: nowMs });
   }
 
   /*
@@ -103,6 +129,7 @@ export function createRoom(code: string, config: RoomConfig) {
     if (outcome.kind === "start") {
       timeline = { positionMs: outcome.positionMs, startAtServerMs: outcome.startAtServerMs };
       playing = true;
+      awaitingStart = false;
     }
     return outcome;
   }
@@ -444,10 +471,13 @@ export function createRoom(code: string, config: RoomConfig) {
        * changeaient separement. L ancre est la position rapportee par le client, pas
        * celle qu extrapolerait le serveur, parce que c est elle qui a fige et c est elle
        * qui part dans la barriere.
+       *
+       * Le gel vit desormais dans `openBarrier`, partage avec les deux autres ouvreurs
+       * (revue du 11/09/2026, #9). Ce qui reste propre a la stagnation: la lecture
+       * s arrete vraiment, donc `playing` tombe.
        */
-      timeline = { positionMs, startAtServerMs: nowMs };
       playing = false;
-      return barrier.open({ positionMs, atServerMs: nowMs });
+      return openBarrier(positionMs, nowMs);
     },
 
     ready(participantId: string, barrierId: number, nowMs: number): BarrierOutcome {
@@ -465,7 +495,7 @@ export function createRoom(code: string, config: RoomConfig) {
     },
 
     resumeAt(positionMs: number, nowMs: number): Waiting {
-      return barrier.open({ positionMs, atServerMs: nowMs });
+      return openBarrier(positionMs, nowMs);
     },
 
     /*
@@ -484,7 +514,8 @@ export function createRoom(code: string, config: RoomConfig) {
     /** Un arrivant en cours de lecture doit passer par un depart commun (F1). */
     rejoinBarrier(nowMs: number): Waiting | null {
       if (!playing) return null;
-      return barrier.open({ positionMs: this.positionNow(nowMs), atServerMs: nowMs });
+      // La position se lit avant l ouverture, qui la gele (revue du 11/09/2026, #9).
+      return openBarrier(positionAt(nowMs), nowMs);
     },
   };
 }
