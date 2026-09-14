@@ -514,6 +514,27 @@ describe("duree jouee, de la room a la ligne (U4)", () => {
   });
 
   /*
+   * Revue du 11/09/2026, #9, de bout en bout. Ce que le test de la room ne peut pas
+   * montrer: le plafond pose en #7 ne couvre pas ce defaut. Il borne au temps ecoule
+   * depuis le premier depart commun, or l attente fait courir ce temps-la aussi. Ici
+   * 60 600 ms se sont ecoulees pour 30 000 ms entendues: le plafond laisse passer, et
+   * seul le gel de la timeline donne la duree juste.
+   */
+  it("n ecrit pas l attente d un depart commun qui n a jamais eu lieu (revue du 11/09/2026, #9)", () => {
+    const room = enLecture([leo]);
+    const pause = T0 + CFG.leadMs + 30_000;
+    transport(room, "pause", pause);
+    // Reprise du transport: la room reancre, la barriere s ouvre, personne n est pret.
+    const ouverture = pause + 100;
+    transport(room, "play", ouverture);
+    room.resumeAt(room.positionNow(ouverture), ouverture);
+
+    transport(room, "next", ouverture + 30_000);
+
+    expect(ligneDe("kJQP7kiw5Fk")?.listenedMs).toBe(30_000);
+  });
+
+  /*
    * Le cas legitime le plus proche du plafond: le premier morceau relance par
    * « precedent » garde sa cle et son premier horodatage, et ses deux passages
    * s additionnent a une seconde du temps ecoule, les deux delais de depart.

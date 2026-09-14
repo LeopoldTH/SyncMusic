@@ -749,6 +749,139 @@ describe("gel de la timeline pendant une stagnation (U1)", () => {
 });
 
 /*
+ * Revue du 11/09/2026, #9. Meme famille que U1, elargie aux deux autres ouvreurs de
+ * barriere: `stall` gelait la timeline, `resumeAt` et `rejoinBarrier` non. Or les trois
+ * produisent le meme etat cote client, qui se met en pause a la position annoncee et
+ * attend (client/sync/session.ts, case "waiting"). Rien ne s entend pendant ce temps.
+ *
+ * Mesure: 30 000 ms joues, pause, reprise, puis une attente de 30 s pour un partenaire
+ * qui ne se declare jamais pret. `control("next")` rendait 60 000 ms, `finalSegment`
+ * 50 000 ms au bout de 20 s d attente. L attente peut durer jusqu au delai maximum,
+ * soit 45 s, et `tick` la prolonge tant que personne n est pret (R17): c est autant de
+ * silence compte comme de l ecoute, sur chacun des trois chemins d ecriture (R1).
+ *
+ * `playing` ne bouge pas: c est ce qui rend le gel sans danger pour la synchronisation.
+ */
+describe("gel de la timeline pendant une attente de barriere (revue du 11/09/2026, #9)", () => {
+  /** Deux participants, un morceau, depart commun a la position zero emis a T0 + leadMs. */
+  function enLecture() {
+    const room = createRoom("ABCD", CFG);
+    room.join("leo", T0);
+    room.join("pote", T0);
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    room.control("play", T0);
+    const depart = room.resumeAt(0, T0);
+    room.ready("leo", depart.barrierId, T0);
+    room.ready("pote", depart.barrierId, T0);
+    return room;
+  }
+
+  /*
+   * Ce que fait le transport sur une reprise (server/index.ts, case "control_transport"):
+   * la room reancre sa timeline, puis la barriere s ouvre sur la position ainsi figee.
+   */
+  function reprise(room: ReturnType<typeof createRoom>, nowMs: number) {
+    room.control("play", nowMs);
+    return room.resumeAt(room.positionNow(nowMs), nowMs);
+  }
+
+  /** L instant ou 30 000 ms ont ete joues depuis le depart commun. */
+  const TRENTE = T0 + CFG.leadMs + 30_000;
+
+  it("ne compte pas l attente qui suit une reprise dans la duree du morceau zappe", () => {
+    const room = enLecture();
+    room.control("pause", TRENTE);
+    reprise(room, TRENTE + 100); // le partenaire ne se declarera jamais pret
+
+    const joue = room.control("next", TRENTE + 100 + 30_000);
+
+    // Sans gel: 60 000 ms, soit les 30 s d attente ajoutees a ce qui a ete entendu.
+    expect(joue?.listenedMs).toBe(30_000);
+  });
+
+  it("ne compte pas l attente ouverte par une arrivee en cours de lecture (F1)", () => {
+    const room = createRoom("ABCD", CFG);
+    room.join("leo", T0);
+    room.queueAdd("leo", "kJQP7kiw5Fk", T0);
+    room.control("play", T0);
+    const depart = room.resumeAt(0, T0);
+    room.ready("leo", depart.barrierId, T0);
+
+    const arrivee = T0 + CFG.leadMs + 30_000;
+    room.join("pote", arrivee);
+    room.rejoinBarrier(arrivee); // l arrivant ne se declarera jamais pret
+
+    const joue = room.control("next", arrivee + 30_000);
+
+    expect(joue?.listenedMs).toBe(30_000);
+  });
+
+  it("arrete le segment final a la position de la barriere, pas a l instant du depart (U5)", () => {
+    const room = enLecture();
+    room.control("pause", TRENTE);
+    reprise(room, TRENTE + 100);
+
+    // Les deux s en vont vingt secondes apres l ouverture, sans que rien soit reparti.
+    const depart = TRENTE + 100 + 20_000;
+    room.disconnect("leo", depart);
+    room.disconnect("pote", depart);
+
+    // Sans gel: 50 000 ms.
+    expect(room.finalSegment()?.listenedMs).toBe(30_000);
+  });
+
+  it("laisse la position figee pendant toute l attente, meme prolongee par un tick", () => {
+    const room = enLecture();
+    room.control("pause", TRENTE);
+    const ouverture = TRENTE + 100;
+    reprise(room, ouverture);
+
+    expect(room.positionNow(ouverture + 10_000)).toBe(30_000);
+    // Personne n est pret: `tick` repousse l echeance au lieu de faire partir (R17).
+    expect(room.tick(ouverture + CFG.maxWaitMs + 1_000).kind).toBe("waiting");
+    expect(room.positionNow(ouverture + CFG.maxWaitMs + 1_000)).toBe(30_000);
+  });
+
+  /* Le cas courant, qui ne doit rien perdre: une attente qui aboutit mesure juste. */
+  it("mesure exactement la lecture reelle quand l attente aboutit", () => {
+    const room = enLecture();
+    room.control("pause", TRENTE);
+    const reprisAt = TRENTE + 10_000;
+    const attente = reprise(room, reprisAt);
+    const prets = reprisAt + 5_000; // cinq secondes d attente avant le depart commun
+    room.ready("leo", attente.barrierId, prets);
+    room.ready("pote", attente.barrierId, prets);
+
+    const joue = room.control("next", prets + CFG.leadMs + 20_000);
+
+    expect(joue?.listenedMs).toBe(50_000);
+  });
+
+  /*
+   * L invariant qui rend le gel sans danger: `playing` n est pas touche. `room_state`
+   * annonce toujours la lecture, et `peerPositions` continue de ramener les rapports a
+   * un instant commun. Le lier au gel rejouerait le defaut du 04/09/2026: deux clients
+   * rigoureusement synchrones affiches avec l ecart de l age de leurs rapports.
+   */
+  it("ne touche ni a l etat de lecture diffuse ni au recalage des positions rapportees", () => {
+    const room = enLecture();
+    room.control("pause", TRENTE);
+    const ouverture = TRENTE + 100;
+    reprise(room, ouverture);
+
+    expect(room.state().playing).toBe(true);
+
+    room.reportPosition("leo", { positionMs: 30_000, fresh: true }, ouverture + 1_000);
+    room.reportPosition("pote", { positionMs: 30_900, fresh: true }, ouverture + 1_900);
+    const positions = room.peerPositions(ouverture + 1_900).positions;
+    const [a, b] = positions;
+    if (!a || !b) return expect.unreachable("deux positions etaient attendues");
+
+    expect(a.positionMs - b.positionMs).toBe(0);
+  });
+});
+
+/*
  * U4, R1, KTD1. La duree d une ecoute se lit dans l entonnoir de transport, avant que
  * la mutation n efface ce qu il y avait a mesurer: `next` et `previous` posent
  * `timeline = null` et la position retombe a zero, donc lire apres, c est enregistrer
