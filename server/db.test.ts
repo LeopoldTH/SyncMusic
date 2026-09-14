@@ -137,7 +137,7 @@ describe("migrations", () => {
   it("laisse la version et la table intactes quand une migration echoue", () => {
     const path = tempDbPath();
     baseVersion1(path, ["inst-1#i1"]);
-    // L index existe deja: la migration 2 echoue a sa derniere instruction, apres avoir
+    // L index existe deja: la migration 2 echoue sur l un de ses index, apres avoir
     // ajoute ses colonnes. La transaction par script doit donc defaire des ALTER reussis.
     const prepare = new DatabaseSync(path);
     prepare.exec("CREATE INDEX history_by_session ON history_entries(user_id)");
@@ -168,6 +168,30 @@ describe("migrations", () => {
     // Sans index, le regroupement par seance passerait par un scan complet: c est
     // exactement ce que KTD4 refuse en faisant de l instance une colonne.
     expect(plan).toContain("history_by_session");
+  });
+
+  it("sert la recherche du titre le plus recent d une video par un index (U7, R7)", () => {
+    const path = tempDbPath();
+    openDatabase(path).close();
+
+    const raw = new DatabaseSync(path);
+    const plan = raw.prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT (SELECT t.title FROM history_entries t
+               WHERE t.user_id = 1 AND t.video_id = h.video_id AND t.title IS NOT NULL
+               ORDER BY t.played_at DESC, t.id DESC LIMIT 1) AS title
+      FROM history_entries h
+      WHERE h.user_id = 1 AND h.listened_ms IS NOT NULL
+      GROUP BY h.video_id
+    `).all().map((row) => String(row["detail"])).join(" | ");
+    raw.close();
+    /*
+     * Le top morceaux lance cette sous-requete pour chaque video du classement. Sans
+     * index dessus, chacune relit tout l historique du compte et le cout grimpe plus
+     * vite que le nombre de lignes: mesure du 09/09/2026, 37 ms a 5 000 lignes contre
+     * 2,2 ms avec. Ce test echoue si l index cesse d etre celui que SQLite choisit.
+     */
+    expect(plan).toContain("history_by_video");
   });
 
   it("ne rejoue rien a la reouverture et garde les donnees", () => {

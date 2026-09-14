@@ -109,6 +109,12 @@ export const MIGRATIONS: readonly string[] = [
   WHERE instr(room_item_key, '#') > 1;
 
   CREATE INDEX history_by_session ON history_entries(user_id, room_instance_id, played_at);
+
+  -- Le top morceaux cherche, pour chaque video, son titre et son artiste les plus
+  -- recents non nuls. Sans cet index chaque groupe relit tout l historique du compte,
+  -- et le cout grimpe plus vite que le nombre de lignes. Mesure du 09/09/2026 sur une
+  -- base jetable: 37 ms a 5 000 lignes, 2,2 ms avec (U7, R7).
+  CREATE INDEX history_by_video ON history_entries(user_id, video_id, played_at DESC, id DESC);
   `,
 ];
 
