@@ -400,6 +400,19 @@ export function openDatabase(path: string) {
      * deja. Un `SET listened_ms = ?` ecraserait une duree juste par celle de la
      * seconde ecoute quand un morceau redevient courant dans la meme seance (AE7).
      *
+     * Le plafond `MIN(..., ? - played_at)` (revue du 11/09/2026, #7). La duree vient
+     * d une position que le client peut annoncer sans limite, via une stagnation, et la
+     * cle vise la ligne de chaque compte present, donc aussi celle de l autre. Une ligne
+     * ne peut pas avoir entendu plus que le temps ecoule depuis son premier depart
+     * commun, `played_at`, que `INSERT OR IGNORE` ne deplace jamais. Borner ici plutot
+     * qu au protocole couvre tous les chemins d ecriture sans toucher a la
+     * synchronisation. Le calcul se fait ligne par ligne: un compte arrive en cours de
+     * morceau est borne sur son propre depart.
+     *
+     * Le `MAX` exterieur garde R1: la duree ne decroit jamais. Sans lui, une horloge
+     * serveur qui recule (ajustement NTP) rendrait un plafond inferieur a la valeur
+     * deja ecrite, et l `UPDATE` l abaisserait.
+     *
      * `COALESCE` sur les trois textes: on complete ce que la ligne porte a vide quand
      * oEmbed a repondu apres le depart commun, sans jamais ecraser une valeur presente.
      *
@@ -410,7 +423,10 @@ export function openDatabase(path: string) {
      */
     addListenedMs: db.prepare(`
       UPDATE history_entries
-      SET listened_ms   = COALESCE(listened_ms, 0) + ?,
+      SET listened_ms   = MAX(
+            COALESCE(listened_ms, 0),
+            MIN(COALESCE(listened_ms, 0) + ?, MAX(0, ? - played_at))
+          ),
           title         = COALESCE(title, ?),
           channel_title = COALESCE(channel_title, ?),
           thumbnail_url = COALESCE(thumbnail_url, ?)
@@ -736,7 +752,9 @@ export function openDatabase(path: string) {
      * present (U4, R1). Aucun compte en entree: l appelant peut etre la destruction
      * d une room, ou plus aucune session n existe.
      *
-     * La duree ne decroit jamais (R1): une valeur negative n enleve rien. Rend le
+     * La duree ne decroit jamais (R1): une valeur negative n enleve rien. Elle ne
+     * depasse pas non plus le temps ecoule entre le premier depart commun de la ligne
+     * et `nowMs`, l horloge du serveur a l ecriture (revue du 11/09/2026, #7). Rend le
      * nombre de lignes touchees, zero quand aucun compte connecte n ecoutait.
      */
     addListenedMs(entry: {
@@ -750,9 +768,10 @@ export function openDatabase(path: string) {
       title?: string | null;
       channelTitle?: string | null;
       thumbnailUrl?: string | null;
-    }): number {
+    }, nowMs: number): number {
       const result = statements.addListenedMs.run(
         Math.max(0, Math.round(entry.listenedMs)),
+        nowMs,
         clampText(entry.title ?? null),
         clampText(entry.channelTitle ?? null),
         clampText(entry.thumbnailUrl ?? null),
