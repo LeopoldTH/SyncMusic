@@ -24,6 +24,34 @@ describe("recuperation des informations d une video", () => {
     });
   });
 
+  it("coupe le suffixe Topic des chaines generees par YouTube", async () => {
+    // Observe en production le 14/09/2026: la premiere ecoute enregistree portait
+    // l artiste « Terrazules - Topic ». YouTube genere une chaine « <artiste> - Topic »
+    // pour chaque artiste musical, et ce suffixe se retrouvait tel quel sur l ecran.
+    // Contrairement a « LuisFonsiVEVO », assume comme approximation, celui-ci est un
+    // suffixe fixe en fin de chaine: il se coupe sans deviner.
+    mockFetch(() => ok({ ...REPONSE_UTILE, author_name: "Terrazules - Topic" }));
+    await expect(fetchVideoInfo("wHtpIvtVF7Y")).resolves.toMatchObject({
+      channelTitle: "Terrazules",
+    });
+  });
+
+  it("ne touche pas a une chaine dont le nom contient Topic sans etre un suffixe", async () => {
+    // Le suffixe ne se reconnait qu en fin de chaine, precede du tiret: une chaine
+    // qui s appelle « Topic » ou « Topic Radio » garde son nom entier.
+    for (const nom of ["Topic", "Topic Radio", "Hot Topic", "Off - Topic Podcast"]) {
+      mockFetch(() => ok({ ...REPONSE_UTILE, author_name: nom }));
+      await expect(fetchVideoInfo("kJQP7kiw5Fk")).resolves.toMatchObject({ channelTitle: nom });
+    }
+  });
+
+  it("garde la chaine telle quelle si couper le suffixe ne laissait rien", async () => {
+    // Une chaine qui s appelle exactement « - Topic » n a pas de nom d artiste
+    // derriere. Rendre une chaine vide serait pire que rendre le nom brut.
+    mockFetch(() => ok({ ...REPONSE_UTILE, author_name: "- Topic" }));
+    await expect(fetchVideoInfo("kJQP7kiw5Fk")).resolves.toMatchObject({ channelTitle: "- Topic" });
+  });
+
   it("interroge bien l identifiant demande", async () => {
     let seen = "";
     mockFetch((...args: unknown[]) => { seen = String(args[0]); return ok(REPONSE_UTILE); });
