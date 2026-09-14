@@ -84,6 +84,12 @@ export function recordPlayedSegment(args: {
   /** L instance de room, jamais le code a quatre lettres, qui se recycle (KTD6). */
   instanceId: string;
   played: PlayedSegment;
+  /*
+   * L horloge du serveur a l ecriture. Elle borne la duree au temps ecoule depuis le
+   * premier depart commun: la position que rend la room peut venir d une stagnation
+   * annoncee sans plafond par un autre participant (revue du 11/09/2026, #7).
+   */
+  nowMs: number;
 }): void {
   const { item } = args.played;
   args.db.addListenedMs({
@@ -94,5 +100,5 @@ export function recordPlayedSegment(args: {
     title: item.title,
     channelTitle: item.channelTitle,
     thumbnailUrl: item.thumbnailUrl,
-  });
+  }, args.nowMs);
 }

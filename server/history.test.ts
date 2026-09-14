@@ -309,7 +309,7 @@ describe("duree jouee, de la room a la ligne (U4)", () => {
     nowMs: number,
   ): void {
     const played = room.control(action, nowMs);
-    if (played) recordPlayedSegment({ db, instanceId: "i1", played });
+    if (played) recordPlayedSegment({ db, instanceId: "i1", played, nowMs });
   }
 
   /** Deux morceaux, depart commun emis a T0 + leadMs, position 0. */
@@ -365,8 +365,9 @@ describe("duree jouee, de la room a la ligne (U4)", () => {
   it("ecrit la duree sur une fin naturelle de piste comme sur un zap (R1)", () => {
     const room = enLecture([leo]);
 
-    const outcome = room.trackEnded("q1", T0 + CFG.leadMs + 12_000);
-    if (outcome.played) recordPlayedSegment({ db, instanceId: "i1", played: outcome.played });
+    const fin = T0 + CFG.leadMs + 12_000;
+    const outcome = room.trackEnded("q1", fin);
+    if (outcome.played) recordPlayedSegment({ db, instanceId: "i1", played: outcome.played, nowMs: fin });
 
     expect(ligneDe("kJQP7kiw5Fk")?.listenedMs).toBe(12_000);
   });
@@ -461,11 +462,72 @@ describe("duree jouee, de la room a la ligne (U4)", () => {
       db,
       instanceId: "i1",
       played: { item: item({ title: null }), listenedMs: 5_000 },
+      nowMs: T0 + CFG.leadMs + 5_000,
     });
 
     expect(db.listHistory(leo.id, 10)[0]).toMatchObject({
       title: "Despacito", listenedMs: 5_000,
     });
+  });
+
+  /*
+   * Revue du 11/09/2026, #7. Le protocole accepte une position de stagnation sans
+   * plafond, la room reancre la timeline dessus, et la fin de morceau ecrit la duree
+   * sur la ligne de chaque compte present: un participant pouvait ainsi inscrire une
+   * duree arbitraire et definitive dans l historique de l autre. L ecriture la ramene
+   * au temps ecoule depuis le premier depart commun de la ligne.
+   */
+  it("ramene au temps ecoule une position de stagnation hostile, sur les deux comptes (revue du 11/09/2026, #7)", () => {
+    const ami = db.upsertUser({ googleSub: "sub-ami", name: "Ami", email: null }, T0);
+    const room = enLecture([leo, ami]);
+    room.join("pote", T0);
+    const stagnation = T0 + CFG.leadMs + 10_000;
+    room.stall("pote", 1e12, stagnation);
+    const zap = stagnation + 1_000;
+
+    transport(room, "next", zap);
+
+    // Les deux lignes sont nees au depart commun de T0: rien n a pu s entendre avant.
+    const ecoule = zap - T0;
+    expect(ligneDe("kJQP7kiw5Fk")?.listenedMs).toBe(ecoule);
+    expect(db.listHistory(ami.id, 10)[0]?.listenedMs).toBe(ecoule);
+  });
+
+  /*
+   * Le chemin legitime de la stagnation, celui qu emprunte l attaque: une vraie pub
+   * fige la lecture a sa position reelle, puis la barriere se leve. Le temps ecoule
+   * compte la pub, la position non: le plafond reste loin et la duree est exacte.
+   */
+  it("ecrit la duree exacte d un changement de morceau apres une vraie pub (revue du 11/09/2026, #7)", () => {
+    const room = enLecture([leo]);
+    const pub = T0 + CFG.leadMs + 10_000;
+    const attente = room.stall("leo", 10_000, pub);
+    if (attente.kind === "ignored") return expect.unreachable("la stagnation aurait du ouvrir une barriere");
+    const finPub = pub + 30_000;
+    const levee = room.ready("leo", attente.barrierId, finPub);
+    if (levee.kind !== "start") return expect.unreachable("la barriere aurait du se lever");
+    recordCommonStart({ db, instanceId: "i1", snapshot: room.state(), users: [leo], nowMs: finPub });
+
+    transport(room, "next", levee.startAtServerMs + 5_000);
+
+    expect(ligneDe("kJQP7kiw5Fk")?.listenedMs).toBe(15_000);
+  });
+
+  /*
+   * Le cas legitime le plus proche du plafond: le premier morceau relance par
+   * « precedent » garde sa cle et son premier horodatage, et ses deux passages
+   * s additionnent a une seconde du temps ecoule, les deux delais de depart.
+   */
+  it("additionne les deux passages d un morceau relance quand ils tiennent sous le plafond (revue du 11/09/2026, #7)", () => {
+    const room = enLecture([leo]);
+    const relance = T0 + CFG.leadMs + 30_000;
+    transport(room, "previous", relance);
+    depart(room, [leo], relance);
+
+    transport(room, "next", relance + CFG.leadMs + 20_000);
+
+    // 50 000 ms joues pour 51 000 ms ecoules depuis T0.
+    expect(ligneDe("kJQP7kiw5Fk")?.listenedMs).toBe(50_000);
   });
 });
 
@@ -495,7 +557,7 @@ describe("duree du dernier morceau a la destruction de la room (U5, R5)", () => 
   function balayer(reg: ReturnType<typeof createRegistry>, nowMs: number): void {
     for (const destroyed of reg.sweep(nowMs)) {
       const played = destroyed.room.finalSegment();
-      if (played) recordPlayedSegment({ db, instanceId: destroyed.instanceId, played });
+      if (played) recordPlayedSegment({ db, instanceId: destroyed.instanceId, played, nowMs });
     }
   }
 
@@ -595,14 +657,14 @@ describe("duree du dernier morceau a la destruction de la room (U5, R5)", () => 
     const { room, instanceId } = enLecture(reg, [leo]);
     const zap = T0 + CFG.leadMs + 30_000;
     const premier = room.control("next", zap);
-    if (premier) recordPlayedSegment({ db, instanceId, played: premier });
+    if (premier) recordPlayedSegment({ db, instanceId, played: premier, nowMs: zap });
     const suite = room.resumeAt(0, zap);
     room.ready("leo", suite.barrierId, zap);
     room.ready("pote", suite.barrierId, zap);
     recordCommonStart({ db, instanceId, snapshot: room.state(), users: [leo], nowMs: zap });
     const retour = zap + CFG.leadMs + 5_000;
     const second = room.control("previous", retour);
-    if (second) recordPlayedSegment({ db, instanceId, played: second });
+    if (second) recordPlayedSegment({ db, instanceId, played: second, nowMs: retour });
     const reprise = room.resumeAt(0, retour);
     room.ready("leo", reprise.barrierId, retour);
     room.ready("pote", reprise.barrierId, retour);

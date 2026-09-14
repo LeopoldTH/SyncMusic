@@ -578,11 +578,14 @@ function broadcastStart(
  * Un morceau vient de cesser d etre courant: sa duree s ajoute a la ligne de chaque
  * compte qui l ecoutait (U4, R1). La room a mesure avant de muter et rend le segment;
  * c est ici qu on ecrit, elle ignore que la persistance existe (KTD9).
+ *
+ * `nowMs` borne la duree au temps ecoule depuis le premier depart commun, la position
+ * pouvant venir d une stagnation hostile (revue du 11/09/2026, #7).
  */
-function recordPlayed(code: string, played: PlayedSegment): void {
+function recordPlayed(code: string, played: PlayedSegment, nowMs: number): void {
   const instanceId = registry.instanceOf(code);
   if (instanceId === undefined) return;
-  recordPlayedSegment({ db, instanceId, played });
+  recordPlayedSegment({ db, instanceId, played, nowMs });
 }
 
 function attachSocket(socket: WebSocket, user: User | null): void {
@@ -703,7 +706,7 @@ function attachSocket(socket: WebSocket, user: User | null): void {
       }
       case "track_ended": {
         const outcome = room.trackEnded(message.itemId, now);
-        if (outcome.played) recordPlayed(code, outcome.played);
+        if (outcome.played) recordPlayed(code, outcome.played, now);
         if (!outcome.advanced) return; // rapport en double: le morceau a deja change
         broadcastState(code, room);
         if (!outcome.hasNext) return;  // file terminee: la lecture s arrete (R7)
@@ -749,7 +752,7 @@ function attachSocket(socket: WebSocket, user: User | null): void {
       }
       case "control_transport": {
         const played = room.control(message.action, now);
-        if (played) recordPlayed(code, played);
+        if (played) recordPlayed(code, played, now);
         broadcastState(code, room);
         // Toute reprise passe par un depart commun (R11), sans exception.
         if (message.action === "play" || message.action === "next" || message.action === "previous") {
@@ -827,10 +830,13 @@ setInterval(() => {
    * La duree se lit a l instant du dernier depart, que la room tient elle-meme, pas a
    * maintenant (KTD2): entre les deux il y a le delai de grace puis l attente du
    * balayage, soit jusqu a quarante secondes de silence.
+   *
+   * Le plafond de la duree, lui, se prend a maintenant (revue du 11/09/2026, #7): plus
+   * tard que le dernier depart, il est plus lache et ne rogne jamais une duree juste.
    */
   for (const destroyed of registry.sweep(now)) {
     const played = destroyed.room.finalSegment();
-    if (played) recordPlayedSegment({ db, instanceId: destroyed.instanceId, played });
+    if (played) recordPlayedSegment({ db, instanceId: destroyed.instanceId, played, nowMs: now });
   }
   searchBudget.sweep(now);
 }, SWEEP_MS);

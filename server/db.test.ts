@@ -450,6 +450,10 @@ describe("historique", () => {
  * duree. Elle vise la cle de morceau seule, sans compte: a la destruction d une room
  * plus aucune session n existe, et les lignes n existent que pour des comptes
  * connectes puisque le depart commun applique deja la garde.
+ *
+ * L horloge d ecriture de chaque test vaut au moins le premier depart plus la duree
+ * cumulee: une ligne ne peut pas avoir entendu plus que le temps ecoule, et l ecriture
+ * plafonne a ce temps (revue du 11/09/2026, #7).
  */
 describe("duree jouee accumulee (U4)", () => {
   const ECOUTE = {
@@ -462,7 +466,7 @@ describe("duree jouee accumulee (U4)", () => {
     const user = withUser(db);
     db.recordListen({ userId: user, ...ECOUTE }, T0);
 
-    expect(db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 10_000 })).toBe(1);
+    expect(db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 10_000 }, T0 + 10_000)).toBe(1);
     expect(db.listHistory(user, 10)[0]?.listenedMs).toBe(10_000);
   });
 
@@ -471,8 +475,8 @@ describe("duree jouee accumulee (U4)", () => {
     const user = withUser(db);
     db.recordListen({ userId: user, ...ECOUTE }, T0);
 
-    db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 30_000 });
-    db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 20_000 });
+    db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 30_000 }, T0 + 30_000);
+    db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 20_000 }, T0 + 50_000);
 
     expect(db.listHistory(user, 10)[0]?.listenedMs).toBe(50_000);
   });
@@ -481,9 +485,26 @@ describe("duree jouee accumulee (U4)", () => {
     const db = fresh();
     const user = withUser(db);
     db.recordListen({ userId: user, ...ECOUTE }, T0);
-    db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 30_000 });
+    db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 30_000 }, T0 + 30_000);
 
-    db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: -10_000 });
+    db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: -10_000 }, T0 + 40_000);
+
+    expect(db.listHistory(user, 10)[0]?.listenedMs).toBe(30_000);
+  });
+
+  /*
+   * Le plafond de #7 se calcule avec l horloge du serveur. Si elle recule (ajustement
+   * NTP), il passe sous la duree deja ecrite: sans le MAX exterieur, l UPDATE la
+   * rabaisserait, ce que R1 interdit (revue du 11/09/2026, #7).
+   */
+  it("une horloge serveur qui recule ne rabaisse pas une duree deja ecrite (R1)", () => {
+    const db = fresh();
+    const user = withUser(db);
+    db.recordListen({ userId: user, ...ECOUTE }, T0);
+    db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 30_000 }, T0 + 30_000);
+
+    // L horloge recule de vingt secondes: le plafond ne vaudrait plus que 10 000 ms.
+    db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 5_000 }, T0 + 10_000);
 
     expect(db.listHistory(user, 10)[0]?.listenedMs).toBe(30_000);
   });
@@ -495,7 +516,7 @@ describe("duree jouee accumulee (U4)", () => {
     db.recordListen({ userId: leo, ...ECOUTE }, T0);
     db.recordListen({ userId: ami, ...ECOUTE }, T0);
 
-    expect(db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 25_000 })).toBe(2);
+    expect(db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 25_000 }, T0 + 25_000)).toBe(2);
     expect(db.listHistory(leo, 10)[0]?.listenedMs).toBe(25_000);
     expect(db.listHistory(ami, 10)[0]?.listenedMs).toBe(25_000);
   });
@@ -505,7 +526,7 @@ describe("duree jouee accumulee (U4)", () => {
     const user = withUser(db);
     db.recordListen({ userId: user, ...ECOUTE }, T0);
 
-    expect(db.addListenedMs({ roomItemKey: "inst-9#i1", listenedMs: 10_000 })).toBe(0);
+    expect(db.addListenedMs({ roomItemKey: "inst-9#i1", listenedMs: 10_000 }, T0 + 10_000)).toBe(0);
     expect(db.listHistory(user, 10)[0]?.listenedMs).toBeNull();
   });
 
@@ -517,7 +538,7 @@ describe("duree jouee accumulee (U4)", () => {
       userId: user, ...ECOUTE, roomItemKey: "inst-2#i1", roomInstanceId: "inst-2",
     }, T0 + JOUR);
 
-    db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 10_000 });
+    db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 10_000 }, T0 + 10_000);
 
     const [recente, ancienne] = db.listHistory(user, 10);
     expect(ancienne).toMatchObject({ playedAt: T0, listenedMs: 10_000 });
@@ -535,7 +556,7 @@ describe("duree jouee accumulee (U4)", () => {
       title: "Get Lucky",
       channelTitle: "DaftPunkVEVO",
       thumbnailUrl: "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
-    });
+    }, T0 + 10_000);
 
     expect(db.listHistory(user, 10)[0]).toMatchObject({
       title: "Get Lucky",
@@ -551,7 +572,7 @@ describe("duree jouee accumulee (U4)", () => {
 
     db.addListenedMs({
       roomItemKey: "inst-1#i1", listenedMs: 10_000, title: null, channelTitle: null,
-    });
+    }, T0 + 10_000);
 
     expect(db.listHistory(user, 10)[0]).toMatchObject({
       title: "Get Lucky", channelTitle: "DaftPunkVEVO",
@@ -563,9 +584,24 @@ describe("duree jouee accumulee (U4)", () => {
     const user = withUser(db);
     db.recordListen({ userId: user, ...ECOUTE, title: null }, T0);
 
-    db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 1, title: "x".repeat(500) });
+    db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 1, title: "x".repeat(500) }, T0 + 1);
 
     expect(db.listHistory(user, 10)[0]?.title).toHaveLength(LIMITS.titleChars);
+  });
+
+  /*
+   * Revue du 11/09/2026, #7. Une position de stagnation hostile se lit comme une duree
+   * arbitraire; l ecriture la ramene au temps ecoule depuis le premier depart commun,
+   * seul majorant que le client ne controle pas.
+   */
+  it("ecrit le temps ecoule depuis le premier depart, pas une duree qui le depasse (revue du 11/09/2026, #7)", () => {
+    const db = fresh();
+    const user = withUser(db);
+    db.recordListen({ userId: user, ...ECOUTE }, T0);
+
+    db.addListenedMs({ roomItemKey: "inst-1#i1", listenedMs: 90_000 }, T0 + 60_000);
+
+    expect(db.listHistory(user, 10)[0]?.listenedMs).toBe(60_000);
   });
 });
 
@@ -669,6 +705,7 @@ describe("statistiques d ecoute (U7)", () => {
       n += 1;
       const instance = semis.instance ?? "inst-1";
       const roomItemKey = `${instance}#u${userId}-i${n}`;
+      const at = semis.at ?? T0 + n;
       db.recordListen({
         userId,
         videoId: semis.videoId ?? "dQw4w9WgXcQ",
@@ -677,8 +714,10 @@ describe("statistiques d ecoute (U7)", () => {
         thumbnailUrl: semis.thumbnailUrl ?? null,
         roomItemKey,
         roomInstanceId: instance,
-      }, semis.at ?? T0 + n);
-      if (semis.ms !== undefined) db.addListenedMs({ roomItemKey, listenedMs: semis.ms });
+      }, at);
+      // L ecriture suit l ecoute qu elle mesure: plus tot, le plafond de la revue du
+      // 11/09/2026 (#7) rognerait la duree semee.
+      if (semis.ms !== undefined) db.addListenedMs({ roomItemKey, listenedMs: semis.ms }, at + semis.ms);
     };
   }
 
