@@ -37,6 +37,24 @@ const OEmbedResponse = z.object({
 });
 
 /*
+ * YouTube genere une chaine « <artiste> - Topic » pour chaque artiste musical, et
+ * oEmbed rend ce nom genere plutot que celui de l artiste. Observe en production le
+ * 14/09/2026: la premiere ecoute enregistree affichait « Terrazules - Topic ».
+ *
+ * Le suffixe ne se coupe qu en fin de chaine: une chaine qui s appelle « Topic »,
+ * « Hot Topic » ou « Off - Topic Podcast » garde son nom entier. Et si couper ne
+ * laissait rien, le nom brut vaut mieux qu une chaine vide.
+ *
+ * A ne pas confondre avec « LuisFonsiVEVO », assume comme approximation dans le plan:
+ * celui-la demanderait de deviner ou coupe le nom, ce suffixe-ci est fixe.
+ */
+const SUFFIXE_TOPIC = /^(.+) - Topic$/;
+
+function nomDArtiste(channelTitle: string): string {
+  return SUFFIXE_TOPIC.exec(channelTitle)?.[1] ?? channelTitle;
+}
+
+/*
  * Refus contre panne (R14). Un refus, c est YouTube qui dit que cette video n existe
  * pas pour lui: privee, supprimee, identifiant inexistant. Mesure de U3: un
  * identifiant invalide rend 400, une video valide rend 200.
@@ -66,7 +84,7 @@ export async function fetchVideoInfo(videoId: string, timeoutMs = 4_000): Promis
     return {
       ok: true,
       title: parsed.data.title ?? null,
-      channelTitle: parsed.data.author_name ?? null,
+      channelTitle: parsed.data.author_name ? nomDArtiste(parsed.data.author_name) : null,
       thumbnailUrl: parsed.data.thumbnail_url ?? null,
     };
   } catch {
