@@ -12,6 +12,8 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { z } from "zod";
 import { parseClientMessage, PSEUDO_MAX_CHARS, VideoId, type ServerMessage } from "../shared/protocol";
 import { createRegistry, type Room } from "./roomRegistry";
+import { enterRoom, type SeatingDeps } from "./seating";
+import type { BarrierOutcome } from "../shared/sync/barrier";
 import { fetchEachVideoInfo } from "./videoInfo";
 import { createCoalescer } from "./coalesce";
 import { createStaticHandler } from "./static";
@@ -575,7 +577,10 @@ function fillQueueInfo(code: string, entries: Array<{ itemId: string; videoId: s
  * ce fichier vient de corriger, ou deux handlers avaient oublie ce traitement.
  */
 function leaveSeat(code: string, room: Room, participantId: string, nowMs: number): void {
-  const outcome = room.leave(participantId, nowMs);
+  notifyDeparture(code, room, room.leave(participantId, nowMs), nowMs);
+}
+
+function notifyDeparture(code: string, room: Room, outcome: BarrierOutcome, nowMs: number): void {
   broadcastState(code, room);
   if (outcome.kind === "start") broadcastStart(code, room, outcome, nowMs);
   else if (outcome.kind === "waiting") {
@@ -587,29 +592,13 @@ function leaveSeat(code: string, room: Room, participantId: string, nowMs: numbe
 }
 
 /*
- * Liberer la place qu un socket occupait avant qu il en prenne une autre (defaut du
- * 16/09/2026). Les deux handlers d arrivee changeaient de room sans quitter la
- * precedente: l entree laissee derriere gardait `connected: true` pour toujours, or
- * `expired` exige une deconnexion, donc la room n etait jamais vide au sens du
- * balayage et ne mourait jamais. Creer des rooms en boucle depuis un seul socket
- * suffisait a atteindre le plafond, apres quoi plus personne n ouvrait de soiree.
- *
- * La comparaison porte sur la place, pas seulement sur la room: reprendre une autre
- * place dans la room qu on occupe deja laisserait la sienne derriere soi, fantome elle
- * aussi. Rejoindre la meme place ne libere rien: c est le rafraichissement, que la
- * reprise traite.
+ * Ce que `enterRoom` fait d une place liberee: retrouver la room quittee, et y
+ * traiter le depart comme un depart volontaire.
  */
-function releasePreviousSeat(session: Session, nextCode: string, nextId: string, nowMs: number): void {
-  const code = session.code;
-  if (code === null) return;
-  if (code === nextCode && session.participantId === nextId) return;
-  const room = registry.get(code);
-  // Couper la session de la room avant de diffuser: `membersOf` filtre sur
-  // `session.code`, donc le partant ne recoit pas l etat qu il vient de quitter.
-  session.code = null;
-  if (!room) return;
-  leaveSeat(code, room, session.participantId, nowMs);
-}
+const seating: SeatingDeps = {
+  getRoom: (code) => registry.get(code),
+  onDeparture: notifyDeparture,
+};
 
 /*
  * Un depart commun se diffuse et s inscrit a l historique au meme endroit (U5, KTD6):
@@ -702,9 +691,7 @@ function attachSocket(socket: WebSocket, user: User | null): void {
         return fail(socket, "server_full", "le serveur est plein, reessaie dans un moment");
       }
       const { code, room } = registry.create(now);
-      releasePreviousSeat(session, code, session.participantId, now);
-      room.join(session.participantId, now, nameFor(session, message.name));
-      session.code = code;
+      enterRoom(session, code, room, session.participantId, nameFor(session, message.name), now, seating);
       return broadcastState(code, room);
     }
 
@@ -722,21 +709,10 @@ function attachSocket(socket: WebSocket, user: User | null): void {
       const nextId = claimed !== undefined && room.reclaimable(claimed, now)
         ? claimed
         : session.participantId;
-      /*
-       * Rejoindre d abord, liberer ensuite. L ordre inverse faisait perdre sa place a
-       * qui tape le code d une room pleine: la sienne etait rendue, la nouvelle
-       * refusee, et il se retrouvait assis nulle part (revue du 16/09/2026).
-       * `releasePreviousSeat` doit rester avant l affectation qui suit, puisqu elle
-       * lit l ancienne place pour savoir quoi liberer. Reprendre une autre place de la
-       * room qu on occupe deja reste correct dans cet ordre: cet identifiant est
-       * reprenable donc deja present, et `join` passe alors par sa branche de
-       * reconnexion, qui ne retate jamais le plafond.
-       */
-      const joined = room.join(nextId, now, nameFor(session, message.name));
-      if (!joined.ok) return fail(socket, joined.code, joined.message);
-      releasePreviousSeat(session, message.code, nextId, now);
-      session.participantId = nextId;
-      session.code = message.code;
+      const entered = enterRoom(
+        session, message.code, room, nextId, nameFor(session, message.name), now, seating,
+      );
+      if (!entered.ok) return fail(socket, entered.code, entered.message);
       broadcastState(message.code, room);
       /*
        * Rejoindre une room en cours de lecture ouvre un depart commun (F1): sans lui,
