@@ -181,9 +181,14 @@ const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES 
  * toute exception levee ici sortait du handler et tuait le process, emportant les rooms
  * en memoire: une seule requete forgee suffisait (revue de securite du 15/09/2026).
  * `parseCookies` et `upgradeTargetPath` ferment chacun leur vecteur connu; ce filet
- * ferme la classe entiere, y compris ce qu on n a pas encore trouve.
+ * couvre le reste du chemin synchrone de l upgrade. Il ne couvre pas ce que ce chemin
+ * installe: les ecouteurs de messages et de fermeture tournent hors du try, et une
+ * erreur emise a un tick ulterieur reste une exception non rattrapee.
  */
 http.on("upgrade", (request, socket, head) => {
+  // Node retire son propre ecouteur d erreur avant d emettre: sans celui-ci, une
+  // coupure a un tick ulterieur redevient une exception non rattrapee.
+  socket.on("error", () => {});
   try {
     if (upgradeTargetPath(request.url, authConfig.origin) !== WS_PATH) {
       socket.destroy();
@@ -197,9 +202,11 @@ http.on("upgrade", (request, socket, head) => {
     }
     wss.handleUpgrade(request, socket, head, (ws) => attachSocket(ws, verdict.user));
   } catch (error) {
-    // Jamais l objet d erreur complet: son contexte peut porter un code OAuth.
-    console.error("erreur sur un upgrade de socket");
-    void error;
+    // Jamais l objet d erreur complet ni son message: le contexte de `new URL` porte
+    // l URL fautive, et celui d une erreur OAuth peut porter un code. Le nom de la
+    // classe, lui, ne porte aucune valeur, et sans lui une regression future
+    // n apparaitrait au journal que comme une phrase constante.
+    console.error("erreur sur un upgrade de socket", error instanceof Error ? error.name : typeof error);
     socket.destroy();
   }
 });
@@ -715,11 +722,20 @@ function attachSocket(socket: WebSocket, user: User | null): void {
       const nextId = claimed !== undefined && room.reclaimable(claimed, now)
         ? claimed
         : session.participantId;
+      /*
+       * Rejoindre d abord, liberer ensuite. L ordre inverse faisait perdre sa place a
+       * qui tape le code d une room pleine: la sienne etait rendue, la nouvelle
+       * refusee, et il se retrouvait assis nulle part (revue du 16/09/2026).
+       * `releasePreviousSeat` doit rester avant l affectation qui suit, puisqu elle
+       * lit l ancienne place pour savoir quoi liberer. Reprendre une autre place de la
+       * room qu on occupe deja reste correct dans cet ordre: cet identifiant est
+       * reprenable donc deja present, et `join` passe alors par sa branche de
+       * reconnexion, qui ne retate jamais le plafond.
+       */
+      const joined = room.join(nextId, now, nameFor(session, message.name));
+      if (!joined.ok) return fail(socket, joined.code, joined.message);
       releasePreviousSeat(session, message.code, nextId, now);
       session.participantId = nextId;
-
-      const joined = room.join(session.participantId, now, nameFor(session, message.name));
-      if (!joined.ok) return fail(socket, joined.code, joined.message);
       session.code = message.code;
       broadcastState(message.code, room);
       /*
