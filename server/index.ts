@@ -22,7 +22,7 @@ import {
   type HistoryCursor, type SessionCursor, type User,
 } from "./db";
 import { createGenreFiller } from "./videoTopics";
-import { createAuth, readAuthConfig, readBody, sameOrigin, sendJson } from "./auth";
+import { createAuth, readAuthConfig, readBody, sameOrigin, sendJson, upgradeTargetPath } from "./auth";
 import { recordCommonStart, recordPlayedSegment } from "./history";
 import type { PlayedSegment } from "./room";
 
@@ -176,18 +176,32 @@ const http = createServer((request, response) => {
  */
 const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES });
 
+/*
+ * Le corps est enveloppe comme celui du handler HTTP juste au-dessus. Sans cette garde,
+ * toute exception levee ici sortait du handler et tuait le process, emportant les rooms
+ * en memoire: une seule requete forgee suffisait (revue de securite du 15/09/2026).
+ * `parseCookies` et `upgradeTargetPath` ferment chacun leur vecteur connu; ce filet
+ * ferme la classe entiere, y compris ce qu on n a pas encore trouve.
+ */
 http.on("upgrade", (request, socket, head) => {
-  if (new URL(request.url ?? "/", authConfig.origin).pathname !== WS_PATH) {
+  try {
+    if (upgradeTargetPath(request.url, authConfig.origin) !== WS_PATH) {
+      socket.destroy();
+      return;
+    }
+    const verdict = auth.checkUpgrade(request);
+    if (!verdict.ok) {
+      socket.write(`HTTP/1.1 ${verdict.status} ${verdict.reason}\r\nConnection: close\r\n\r\n`);
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(request, socket, head, (ws) => attachSocket(ws, verdict.user));
+  } catch (error) {
+    // Jamais l objet d erreur complet: son contexte peut porter un code OAuth.
+    console.error("erreur sur un upgrade de socket");
+    void error;
     socket.destroy();
-    return;
   }
-  const verdict = auth.checkUpgrade(request);
-  if (!verdict.ok) {
-    socket.write(`HTTP/1.1 ${verdict.status} ${verdict.reason}\r\nConnection: close\r\n\r\n`);
-    socket.destroy();
-    return;
-  }
-  wss.handleUpgrade(request, socket, head, (ws) => attachSocket(ws, verdict.user));
 });
 
 /*
