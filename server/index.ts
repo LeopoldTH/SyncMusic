@@ -565,6 +565,39 @@ function fillQueueInfo(code: string, entries: Array<{ itemId: string; videoId: s
  * c est le seul instant ou le serveur sait a la fois quel morceau part et qui est la
  * pour l entendre. Le handler `ready` et la boucle de tick passent tous deux par ici.
  */
+/*
+ * Liberer la place qu un socket occupait avant qu il en prenne une autre (defaut du
+ * 16/09/2026). Les deux handlers d arrivee changeaient de room sans quitter la
+ * precedente: l entree laissee derriere gardait `connected: true` pour toujours, or
+ * `expired` exige une deconnexion, donc la room n etait jamais vide au sens du
+ * balayage et ne mourait jamais. Creer des rooms en boucle depuis un seul socket
+ * suffisait a atteindre le plafond, apres quoi plus personne n ouvrait de soiree.
+ *
+ * La comparaison porte sur la place, pas seulement sur la room: reprendre une autre
+ * place dans la room qu on occupe deja laisserait la sienne derriere soi, fantome elle
+ * aussi. Rejoindre la meme place ne libere rien: c est le rafraichissement, que la
+ * reprise traite.
+ */
+function releasePreviousSeat(session: Session, nextCode: string, nextId: string, nowMs: number): void {
+  const code = session.code;
+  if (code === null) return;
+  if (code === nextCode && session.participantId === nextId) return;
+  const room = registry.get(code);
+  // Couper la session de la room avant de diffuser: `membersOf` filtre sur
+  // `session.code`, donc le partant ne recoit pas l etat qu il vient de quitter.
+  session.code = null;
+  if (!room) return;
+  const outcome = room.leave(session.participantId, nowMs);
+  broadcastState(code, room);
+  if (outcome.kind === "start") broadcastStart(code, room, outcome, nowMs);
+  else if (outcome.kind === "waiting") {
+    broadcast(code, {
+      type: "waiting", barrierId: outcome.barrierId, positionMs: outcome.positionMs,
+      waitingFor: outcome.waitingFor, sinceServerMs: nowMs,
+    });
+  }
+}
+
 function broadcastStart(
   code: string,
   room: Room,
@@ -651,6 +684,7 @@ function attachSocket(socket: WebSocket, user: User | null): void {
         return fail(socket, "server_full", "le serveur est plein, reessaie dans un moment");
       }
       const { code, room } = registry.create(now);
+      releasePreviousSeat(session, code, session.participantId, now);
       room.join(session.participantId, now, nameFor(session, message.name));
       session.code = code;
       return broadcastState(code, room);
@@ -667,7 +701,11 @@ function attachSocket(socket: WebSocket, user: User | null): void {
        * il ne servait a rien tant que personne ne rapportait son identifiant.
        */
       const claimed = message.participantId;
-      if (claimed !== undefined && room.reclaimable(claimed, now)) session.participantId = claimed;
+      const nextId = claimed !== undefined && room.reclaimable(claimed, now)
+        ? claimed
+        : session.participantId;
+      releasePreviousSeat(session, message.code, nextId, now);
+      session.participantId = nextId;
 
       const joined = room.join(session.participantId, now, nameFor(session, message.name));
       if (!joined.ok) return fail(socket, joined.code, joined.message);

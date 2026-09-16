@@ -4,6 +4,65 @@ import { createRegistry } from "./roomRegistry";
 const CFG = { maxParticipants: 2, maxWaitMs: 45_000, leadMs: 500, graceMs: 30_000, maxQueue: 100 };
 const T0 = 1_000_000;
 
+/*
+ * Duree de vie d une room quand un client en change (defaut du 16/09/2026). Les
+ * handlers d arrivee rejoignaient la nouvelle room sans quitter la precedente:
+ * l entree laissee derriere restait connectee pour toujours, `expired` exigeant une
+ * deconnexion, donc la room n etait jamais vide et le balayage ne la detruisait
+ * jamais. Ces tests fixent la sequence que le serveur doit suivre; le cablage dans
+ * `server/index.ts` lui-meme n est pas couvert, ce fichier n etant pas chargeable
+ * dans un test.
+ */
+describe("changement de room", () => {
+  it("detruit la premiere room quand son unique occupant est parti ailleurs", () => {
+    const reg = createRegistry(CFG);
+    const premiere = reg.create(T0);
+    premiere.room.join("leo", T0);
+
+    // Ce que fait le serveur quand un client change de room: liberer, puis rejoindre.
+    premiere.room.leave("leo", T0 + 1_000);
+    reg.create(T0 + 1_000).room.join("leo", T0 + 1_000);
+
+    expect(reg.sweep(T0 + 2_000).map((d) => d.code)).toEqual([premiere.code]);
+  });
+
+  it("garde la premiere room pour toujours si la place n est pas liberee", () => {
+    // Le defaut lui-meme: sans le depart, une heure ne suffit pas, ni aucune duree.
+    const reg = createRegistry(CFG);
+    const premiere = reg.create(T0);
+    premiere.room.join("leo", T0);
+    reg.create(T0 + 1_000).room.join("leo", T0 + 1_000);
+
+    expect(reg.sweep(T0 + 3_600_000)).toEqual([]);
+    expect(reg.size()).toBe(2);
+  });
+
+  it("laisse vivre la room ou quelqu un reste", () => {
+    const reg = createRegistry(CFG);
+    const premiere = reg.create(T0);
+    premiere.room.join("leo", T0);
+    premiere.room.join("pote", T0);
+
+    premiere.room.leave("leo", T0 + 1_000);
+
+    expect(reg.sweep(T0 + 2_000)).toEqual([]);
+    expect(premiere.room.state().participants.map((p) => p.id)).toEqual(["pote"]);
+  });
+
+  it("libere la place sans attendre le delai de grace", () => {
+    // Un depart vers une autre room est volontaire: la place part tout de suite,
+    // sinon celui qui reste patiente l attente maximale pour quelqu un qui ne
+    // reviendra pas.
+    const reg = createRegistry(CFG);
+    const premiere = reg.create(T0);
+    premiere.room.join("leo", T0);
+    premiere.room.leave("leo", T0 + 1_000);
+
+    expect(premiere.room.reclaimable("leo", T0 + 1_000)).toBe(false);
+    expect(reg.sweep(T0 + 1_000).map((d) => d.code)).toEqual([premiere.code]);
+  });
+});
+
 describe("attribution des codes", () => {
   it("rend un code de quatre lettres majuscules", () => {
     const reg = createRegistry(CFG);
