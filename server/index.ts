@@ -561,10 +561,24 @@ function fillQueueInfo(code: string, entries: Array<{ itemId: string; videoId: s
 }
 
 /*
- * Un depart commun se diffuse et s inscrit a l historique au meme endroit (U5, KTD6):
- * c est le seul instant ou le serveur sait a la fois quel morceau part et qui est la
- * pour l entendre. Le handler `ready` et la boucle de tick passent tous deux par ici.
+ * Ce qui suit un depart, quelle qu en soit la raison. Les deux appelants different en
+ * amont — l un quitte pour de bon, l autre change de place — mais jamais en aval:
+ * ceux qui restent doivent voir le nouvel etat, et un depart peut debloquer leur
+ * depart commun ou leur attente. Les laisser diverger est exactement le defaut que
+ * ce fichier vient de corriger, ou deux handlers avaient oublie ce traitement.
  */
+function leaveSeat(code: string, room: Room, participantId: string, nowMs: number): void {
+  const outcome = room.leave(participantId, nowMs);
+  broadcastState(code, room);
+  if (outcome.kind === "start") broadcastStart(code, room, outcome, nowMs);
+  else if (outcome.kind === "waiting") {
+    broadcast(code, {
+      type: "waiting", barrierId: outcome.barrierId, positionMs: outcome.positionMs,
+      waitingFor: outcome.waitingFor, sinceServerMs: nowMs,
+    });
+  }
+}
+
 /*
  * Liberer la place qu un socket occupait avant qu il en prenne une autre (defaut du
  * 16/09/2026). Les deux handlers d arrivee changeaient de room sans quitter la
@@ -587,17 +601,14 @@ function releasePreviousSeat(session: Session, nextCode: string, nextId: string,
   // `session.code`, donc le partant ne recoit pas l etat qu il vient de quitter.
   session.code = null;
   if (!room) return;
-  const outcome = room.leave(session.participantId, nowMs);
-  broadcastState(code, room);
-  if (outcome.kind === "start") broadcastStart(code, room, outcome, nowMs);
-  else if (outcome.kind === "waiting") {
-    broadcast(code, {
-      type: "waiting", barrierId: outcome.barrierId, positionMs: outcome.positionMs,
-      waitingFor: outcome.waitingFor, sinceServerMs: nowMs,
-    });
-  }
+  leaveSeat(code, room, session.participantId, nowMs);
 }
 
+/*
+ * Un depart commun se diffuse et s inscrit a l historique au meme endroit (U5, KTD6):
+ * c est le seul instant ou le serveur sait a la fois quel morceau part et qui est la
+ * pour l entendre. Le handler `ready` et la boucle de tick passent tous deux par ici.
+ */
 function broadcastStart(
   code: string,
   room: Room,
@@ -738,15 +749,7 @@ function attachSocket(socket: WebSocket, user: User | null): void {
          * room a la prochaine reouverture de socket.
          */
         session.code = null;
-        const outcome = room.leave(session.participantId, now);
-        broadcastState(code, room);
-        if (outcome.kind === "start") broadcastStart(code, room, outcome, now);
-        else if (outcome.kind === "waiting") {
-          broadcast(code, {
-            type: "waiting", barrierId: outcome.barrierId, positionMs: outcome.positionMs,
-            waitingFor: outcome.waitingFor, sinceServerMs: now,
-          });
-        }
+        leaveSeat(code, room, session.participantId, now);
         return;
       }
       case "queue_add": {
