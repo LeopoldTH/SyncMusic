@@ -89,9 +89,34 @@ export function parseCookies(header: string | undefined): Map<string, string> {
     if (eq === -1) continue;
     const name = part.slice(0, eq).trim();
     if (name === "") continue;
-    jar.set(name, decodeURIComponent(part.slice(eq + 1).trim()));
+    /*
+     * `decodeURIComponent` leve sur un pourcentage mal forme. Non rattrape, un simple
+     * `Cookie: __Host-syncmusic_session=%` sur le handshake tuait le process et toutes
+     * les rooms avec lui (revue de securite du 15/09/2026). Sauter la paire plutot que
+     * de garder la valeur brute: comparee a un identifiant de session, une valeur mal
+     * decodee serait un faux negatif silencieux.
+     */
+    try {
+      jar.set(name, decodeURIComponent(part.slice(eq + 1).trim()));
+    } catch {
+      continue;
+    }
   }
   return jar;
+}
+
+/*
+ * Cible d un upgrade, ou `null` quand l URL est illisible. `new URL` leve sur une cible
+ * aberrante comme `//`, second vecteur du meme crash que la garde ci-dessus. La lecture
+ * vit ici, pure et exportee, pour etre prouvable par un test: `server/index.ts` n est
+ * pas chargeable dans un test, son chargement ouvrant la base et ecoutant le port.
+ */
+export function upgradeTargetPath(rawUrl: string | undefined, origin: string): string | null {
+  try {
+    return new URL(rawUrl ?? "/", origin).pathname;
+  } catch {
+    return null;
+  }
 }
 
 /*

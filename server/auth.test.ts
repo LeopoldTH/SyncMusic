@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { SignJWT, exportJWK, generateKeyPair, createLocalJWKSet, type JWTVerifyGetKey } from "jose";
 import { openDatabase, type Db } from "./db";
-import { createAuth, readAuthConfig, type AuthConfig } from "./auth";
+import { createAuth, readAuthConfig, parseCookies, upgradeTargetPath, type AuthConfig } from "./auth";
 
 /*
  * Tout le chemin de verification s exerce sans reseau: le token endpoint de Google est
@@ -424,6 +424,46 @@ describe("routes inconnues", () => {
 function upgrade(headers: { origin?: string; cookie?: string }): IncomingMessage {
   return { headers } as IncomingMessage;
 }
+
+/*
+ * Revue de securite du 15/09/2026. Une seule requete forgee tuait le process: le
+ * handler d upgrade n a pas de try/catch, et `decodeURIComponent` leve sur un
+ * pourcentage mal forme. Toutes les rooms en memoire partaient avec lui.
+ */
+describe("lecture de cookies hostiles", () => {
+  it("saute une valeur illisible au lieu de lever", () => {
+    expect(() => parseCookies("syncmusic_session=%")).not.toThrow();
+    expect(parseCookies("syncmusic_session=%").has("syncmusic_session")).toBe(false);
+  });
+
+  it("garde les paires valides malgre une paire illisible", () => {
+    // Une seule paire fautive ne doit pas faire perdre la session qui suit.
+    const jar = parseCookies("casse=%E0%A4%A; syncmusic_session=abc");
+    expect(jar.get("syncmusic_session")).toBe("abc");
+  });
+
+  it("decode toujours une valeur echappee ordinaire", () => {
+    expect(parseCookies("syncmusic_session=a%20b").get("syncmusic_session")).toBe("a b");
+  });
+});
+
+/*
+ * Second vecteur du meme handler: `new URL` leve aussi sur une cible aberrante. La
+ * lecture sort ici pour etre prouvable, plutot que de reposer sur le seul filet.
+ */
+describe("lecture de la cible d un upgrade", () => {
+  it("rend null sur une cible illisible, sans lever", () => {
+    // Mesure sous Node 22: `new URL("//", origine)` leve `Invalid URL`.
+    expect(() => upgradeTargetPath("//", BASE_URL)).not.toThrow();
+    expect(upgradeTargetPath("//", BASE_URL)).toBeNull();
+  });
+
+  it("rend le chemin d une cible ordinaire", () => {
+    expect(upgradeTargetPath("/ws", BASE_URL)).toBe("/ws");
+    expect(upgradeTargetPath("/ws?x=1", BASE_URL)).toBe("/ws");
+    expect(upgradeTargetPath(undefined, BASE_URL)).toBe("/");
+  });
+});
 
 describe("identite du socket a l upgrade", () => {
   it("accepte sans cookie et rend un invite (R3)", async () => {

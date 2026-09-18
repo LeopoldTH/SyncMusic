@@ -12,6 +12,8 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { z } from "zod";
 import { parseClientMessage, PSEUDO_MAX_CHARS, VideoId, type ServerMessage } from "../shared/protocol";
 import { createRegistry, type Room } from "./roomRegistry";
+import { enterRoom, type SeatingDeps } from "./seating";
+import type { BarrierOutcome } from "../shared/sync/barrier";
 import { fetchEachVideoInfo } from "./videoInfo";
 import { createCoalescer } from "./coalesce";
 import { createStaticHandler } from "./static";
@@ -22,7 +24,7 @@ import {
   type HistoryCursor, type SessionCursor, type User,
 } from "./db";
 import { createGenreFiller } from "./videoTopics";
-import { createAuth, readAuthConfig, readBody, sameOrigin, sendJson } from "./auth";
+import { createAuth, readAuthConfig, readBody, sameOrigin, sendJson, upgradeTargetPath } from "./auth";
 import { recordCommonStart, recordPlayedSegment } from "./history";
 import type { PlayedSegment } from "./room";
 
@@ -176,18 +178,39 @@ const http = createServer((request, response) => {
  */
 const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES });
 
+/*
+ * Le corps est enveloppe comme celui du handler HTTP juste au-dessus. Sans cette garde,
+ * toute exception levee ici sortait du handler et tuait le process, emportant les rooms
+ * en memoire: une seule requete forgee suffisait (revue de securite du 15/09/2026).
+ * `parseCookies` et `upgradeTargetPath` ferment chacun leur vecteur connu; ce filet
+ * couvre le reste du chemin synchrone de l upgrade. Il ne couvre pas ce que ce chemin
+ * installe: les ecouteurs de messages et de fermeture tournent hors du try, et une
+ * erreur emise a un tick ulterieur reste une exception non rattrapee.
+ */
 http.on("upgrade", (request, socket, head) => {
-  if (new URL(request.url ?? "/", authConfig.origin).pathname !== WS_PATH) {
+  // Node retire son propre ecouteur d erreur avant d emettre: sans celui-ci, une
+  // coupure a un tick ulterieur redevient une exception non rattrapee.
+  socket.on("error", () => {});
+  try {
+    if (upgradeTargetPath(request.url, authConfig.origin) !== WS_PATH) {
+      socket.destroy();
+      return;
+    }
+    const verdict = auth.checkUpgrade(request);
+    if (!verdict.ok) {
+      socket.write(`HTTP/1.1 ${verdict.status} ${verdict.reason}\r\nConnection: close\r\n\r\n`);
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(request, socket, head, (ws) => attachSocket(ws, verdict.user));
+  } catch (error) {
+    // Jamais l objet d erreur complet ni son message: le contexte de `new URL` porte
+    // l URL fautive, et celui d une erreur OAuth peut porter un code. Le nom de la
+    // classe, lui, ne porte aucune valeur, et sans lui une regression future
+    // n apparaitrait au journal que comme une phrase constante.
+    console.error("erreur sur un upgrade de socket", error instanceof Error ? error.name : typeof error);
     socket.destroy();
-    return;
   }
-  const verdict = auth.checkUpgrade(request);
-  if (!verdict.ok) {
-    socket.write(`HTTP/1.1 ${verdict.status} ${verdict.reason}\r\nConnection: close\r\n\r\n`);
-    socket.destroy();
-    return;
-  }
-  wss.handleUpgrade(request, socket, head, (ws) => attachSocket(ws, verdict.user));
 });
 
 /*
@@ -547,6 +570,37 @@ function fillQueueInfo(code: string, entries: Array<{ itemId: string; videoId: s
 }
 
 /*
+ * Ce qui suit un depart, quelle qu en soit la raison. Les deux appelants different en
+ * amont — l un quitte pour de bon, l autre change de place — mais jamais en aval:
+ * ceux qui restent doivent voir le nouvel etat, et un depart peut debloquer leur
+ * depart commun ou leur attente. Les laisser diverger est exactement le defaut que
+ * ce fichier vient de corriger, ou deux handlers avaient oublie ce traitement.
+ */
+function leaveSeat(code: string, room: Room, participantId: string, nowMs: number): void {
+  notifyDeparture(code, room, room.leave(participantId, nowMs), nowMs);
+}
+
+function notifyDeparture(code: string, room: Room, outcome: BarrierOutcome, nowMs: number): void {
+  broadcastState(code, room);
+  if (outcome.kind === "start") broadcastStart(code, room, outcome, nowMs);
+  else if (outcome.kind === "waiting") {
+    broadcast(code, {
+      type: "waiting", barrierId: outcome.barrierId, positionMs: outcome.positionMs,
+      waitingFor: outcome.waitingFor, sinceServerMs: nowMs,
+    });
+  }
+}
+
+/*
+ * Ce que `enterRoom` fait d une place liberee: retrouver la room quittee, et y
+ * traiter le depart comme un depart volontaire.
+ */
+const seating: SeatingDeps = {
+  getRoom: (code) => registry.get(code),
+  onDeparture: notifyDeparture,
+};
+
+/*
  * Un depart commun se diffuse et s inscrit a l historique au meme endroit (U5, KTD6):
  * c est le seul instant ou le serveur sait a la fois quel morceau part et qui est la
  * pour l entendre. Le handler `ready` et la boucle de tick passent tous deux par ici.
@@ -637,8 +691,7 @@ function attachSocket(socket: WebSocket, user: User | null): void {
         return fail(socket, "server_full", "le serveur est plein, reessaie dans un moment");
       }
       const { code, room } = registry.create(now);
-      room.join(session.participantId, now, nameFor(session, message.name));
-      session.code = code;
+      enterRoom(session, code, room, session.participantId, nameFor(session, message.name), now, seating);
       return broadcastState(code, room);
     }
 
@@ -653,11 +706,13 @@ function attachSocket(socket: WebSocket, user: User | null): void {
        * il ne servait a rien tant que personne ne rapportait son identifiant.
        */
       const claimed = message.participantId;
-      if (claimed !== undefined && room.reclaimable(claimed, now)) session.participantId = claimed;
-
-      const joined = room.join(session.participantId, now, nameFor(session, message.name));
-      if (!joined.ok) return fail(socket, joined.code, joined.message);
-      session.code = message.code;
+      const nextId = claimed !== undefined && room.reclaimable(claimed, now)
+        ? claimed
+        : session.participantId;
+      const entered = enterRoom(
+        session, message.code, room, nextId, nameFor(session, message.name), now, seating,
+      );
+      if (!entered.ok) return fail(socket, entered.code, entered.message);
       broadcastState(message.code, room);
       /*
        * Rejoindre une room en cours de lecture ouvre un depart commun (F1): sans lui,
@@ -686,15 +741,7 @@ function attachSocket(socket: WebSocket, user: User | null): void {
          * room a la prochaine reouverture de socket.
          */
         session.code = null;
-        const outcome = room.leave(session.participantId, now);
-        broadcastState(code, room);
-        if (outcome.kind === "start") broadcastStart(code, room, outcome, now);
-        else if (outcome.kind === "waiting") {
-          broadcast(code, {
-            type: "waiting", barrierId: outcome.barrierId, positionMs: outcome.positionMs,
-            waitingFor: outcome.waitingFor, sinceServerMs: now,
-          });
-        }
+        leaveSeat(code, room, session.participantId, now);
         return;
       }
       case "queue_add": {
